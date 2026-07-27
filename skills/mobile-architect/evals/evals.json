@@ -1,0 +1,165 @@
+{
+  "skill_name": "mobile-architect",
+  "evals": [
+    {
+      "id": 0,
+      "prompt": "I'm building a Flutter app and need a solid auth flow. Users sign in with email/password via Supabase. I need to handle token refresh, persist the session securely, and make sure the auth state drives the router (so unauthenticated users can't access protected screens). What's the right architecture and show me the core code?",
+      "expected_output": "Architectural blueprint explaining data flow, then complete BLoC/Cubit + Repository code with secure token storage (flutter_secure_storage), token refresh logic, and router guard driven by auth stream. Ends with Architectural Verification bullets covering security, state safety, and edge cases (token expiry, process death, concurrent refresh).",
+      "assertions": [
+        {
+          "name": "includes-architectural-blueprint",
+          "description": "Response contains an 'Architectural Blueprint' section with prose explanation before any code",
+          "type": "contains_section"
+        },
+        {
+          "name": "uses-secure-storage",
+          "description": "Code uses flutter_secure_storage or platform Keychain/Keystore — never SharedPreferences for tokens",
+          "type": "code_check"
+        },
+        {
+          "name": "no-todo-placeholders",
+          "description": "No // TODO or // implement later comments in the code",
+          "type": "negative_check"
+        },
+        {
+          "name": "includes-architectural-verification",
+          "description": "Response ends with an 'Architectural Verification' bullet list",
+          "type": "contains_section"
+        },
+        {
+          "name": "handles-token-refresh",
+          "description": "Token refresh / expiry edge case is addressed in code or verification",
+          "type": "code_check"
+        }
+      ]
+    },
+    {
+      "id": 1,
+      "prompt": "We're building a React Native field-service app. Technicians use it in tunnels and basements with zero connectivity. All job data must be readable and writable offline, then synced to the backend (a REST API) when connectivity resumes. Conflicts should be handled. Walk me through the architecture and give me the core sync engine code.",
+      "expected_output": "Blueprint covering offline-first strategy (local DB as source of truth, sync queue, conflict resolution approach). Core code for the sync engine with exponential backoff, operation queuing, and conflict handling. Verification bullets covering network failure, concurrent writes, process death mid-sync.",
+      "assertions": [
+        {
+          "name": "includes-architectural-blueprint",
+          "description": "Response has a prose Architectural Blueprint section",
+          "type": "contains_section"
+        },
+        {
+          "name": "addresses-conflict-resolution",
+          "description": "Conflict resolution strategy is described and/or implemented",
+          "type": "semantic_check"
+        },
+        {
+          "name": "uses-retry-backoff",
+          "description": "Exponential backoff or retry logic is present in the sync engine",
+          "type": "code_check"
+        },
+        {
+          "name": "no-todo-placeholders",
+          "description": "No // TODO or placeholder comments",
+          "type": "negative_check"
+        },
+        {
+          "name": "includes-architectural-verification",
+          "description": "Architectural Verification bullets are present at the end",
+          "type": "contains_section"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "I'm using Flutter with Isar as the local database. I need to store user profile data and sensitive financial records. What's the right way to encrypt the sensitive fields, set up the Isar schema, and make sure the data layer is cleanly separated from my UI? Show me the full pattern.",
+      "expected_output": "Blueprint covering encryption approach (field-level vs full-DB, key management via Keychain/Keystore), Isar schema code with proper typing, repository pattern implementation. Verification bullets covering key storage, migration, and null safety.",
+      "assertions": [
+        {
+          "name": "includes-architectural-blueprint",
+          "description": "Prose Architectural Blueprint section is present",
+          "type": "contains_section"
+        },
+        {
+          "name": "uses-secure-key-storage",
+          "description": "Encryption keys are stored in Keychain/Keystore or flutter_secure_storage, not hardcoded",
+          "type": "code_check"
+        },
+        {
+          "name": "repository-pattern-present",
+          "description": "A repository class or interface is shown that abstracts the Isar data source from the domain",
+          "type": "semantic_check"
+        },
+        {
+          "name": "no-dynamic-types",
+          "description": "No use of 'dynamic' type without justification in the code",
+          "type": "negative_check"
+        },
+        {
+          "name": "includes-architectural-verification",
+          "description": "Architectural Verification bullets at the end",
+          "type": "contains_section"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "I'm building a SwiftUI iOS app (iOS 16+) with The Composable Architecture (TCA). I need a feature that shows a paginated list of products fetched from a REST API, supports pull-to-refresh, handles errors gracefully with a retry button, and stores the last successful response in CoreData so the list is available offline. Show me the TCA feature structure and the full implementation.",
+      "expected_output": "Blueprint explaining TCA unidirectional flow (Action -> Reducer -> Effect -> State), CoreData stack setup, pagination logic. Complete Swift code: State/Action/Reducer/Effect for the feature, CoreData entity, repository protocol and implementation. Verification bullets covering offline availability, pagination edge cases, error recovery, and memory safety.",
+      "assertions": [
+        {
+          "name": "includes-architectural-blueprint",
+          "description": "Prose Architectural Blueprint section present before code",
+          "type": "contains_section"
+        },
+        {
+          "name": "uses-tca-pattern",
+          "description": "Code uses TCA State/Action/Reducer structure (or equivalent composable architecture pattern)",
+          "type": "code_check"
+        },
+        {
+          "name": "handles-offline-with-coredata",
+          "description": "CoreData (or SwiftData) is used for offline persistence and referenced in code or verification",
+          "type": "code_check"
+        },
+        {
+          "name": "no-todo-placeholders",
+          "description": "No // TODO or placeholder comments in Swift code",
+          "type": "negative_check"
+        },
+        {
+          "name": "includes-architectural-verification",
+          "description": "Architectural Verification bullets at the end covering edge cases",
+          "type": "contains_section"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "We have a Flutter app (iOS + Android) and a React Native app (iOS + Android) — four targets total. We need a CI/CD pipeline that: runs unit and widget/component tests on every PR, builds signed release artifacts (IPA and AAB) on merge to main, deploys to TestFlight and Google Play internal track automatically, and sends a Slack notification on success or failure. We use GitHub Actions. Design the full pipeline architecture and give me the key workflow YAML.",
+      "expected_output": "Blueprint explaining the pipeline stages and secret management strategy. GitHub Actions YAML for both Flutter and RN covering: test job, build job (with signing), deploy job (TestFlight via fastlane/xcrun, Play via fastlane supply or google-github-actions), Slack notification step. Verification bullets covering secret isolation, signing key security, and failure handling.",
+      "assertions": [
+        {
+          "name": "includes-architectural-blueprint",
+          "description": "Prose blueprint explaining pipeline stages and secret strategy present",
+          "type": "contains_section"
+        },
+        {
+          "name": "covers-signing-secrets",
+          "description": "Signing certificates/keys are handled via GitHub Secrets or a secrets manager — not hardcoded",
+          "type": "code_check"
+        },
+        {
+          "name": "includes-testflight-and-play-deploy",
+          "description": "Both TestFlight (iOS) and Google Play (Android) deployment steps are present",
+          "type": "code_check"
+        },
+        {
+          "name": "includes-slack-notification",
+          "description": "Slack notification step on success and/or failure is included",
+          "type": "code_check"
+        },
+        {
+          "name": "includes-architectural-verification",
+          "description": "Architectural Verification bullets present at the end",
+          "type": "contains_section"
+        }
+      ]
+    }
+  ]
+}

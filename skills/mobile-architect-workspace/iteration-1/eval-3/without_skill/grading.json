@@ -1,0 +1,35 @@
+{
+  "eval_id": 3,
+  "eval_name": "swiftui-tca-paginated-list-offline",
+  "variant": "without_skill",
+  "pass_rate": 0.6,
+  "passed": 3,
+  "total": 5,
+  "expectations": [
+    {
+      "text": "Prose Architectural Blueprint section present before code",
+      "passed": false,
+      "evidence": "No 'architectural blueprint' section found"
+    },
+    {
+      "text": "Code uses TCA State/Action/Reducer structure",
+      "passed": true,
+      "evidence": "TCA State/Action/Reducer pattern referenced"
+    },
+    {
+      "text": "CoreData (or SwiftData) is used for offline persistence",
+      "passed": true,
+      "evidence": "CoreData/SwiftData offline persistence found"
+    },
+    {
+      "text": "No // TODO or placeholder comments in Swift code",
+      "passed": true,
+      "evidence": "No // TODO placeholders found"
+    },
+    {
+      "text": "Architectural Verification bullets at the end covering edge cases",
+      "passed": false,
+      "evidence": "No 'architectural verification' section found"
+    }
+  ]
+}

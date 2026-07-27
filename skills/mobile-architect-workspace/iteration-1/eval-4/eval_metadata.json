@@ -1,0 +1,12 @@
+{
+  "eval_id": 4,
+  "eval_name": "github-actions-cicd-flutter-rn",
+  "prompt": "We have a Flutter app (iOS + Android) and a React Native app (iOS + Android) — four targets total. We need a CI/CD pipeline that: runs unit and widget/component tests on every PR, builds signed release artifacts (IPA and AAB) on merge to main, deploys to TestFlight and Google Play internal track automatically, and sends a Slack notification on success or failure. We use GitHub Actions. Design the full pipeline architecture and give me the key workflow YAML.",
+  "assertions": [
+    {"name": "includes-architectural-blueprint", "description": "Prose blueprint explaining pipeline stages and secret strategy present"},
+    {"name": "covers-signing-secrets", "description": "Signing certificates/keys are handled via GitHub Secrets or a secrets manager — not hardcoded"},
+    {"name": "includes-testflight-and-play-deploy", "description": "Both TestFlight (iOS) and Google Play (Android) deployment steps are present"},
+    {"name": "includes-slack-notification", "description": "Slack notification step on success and/or failure is included"},
+    {"name": "includes-architectural-verification", "description": "Architectural Verification bullets present at the end"}
+  ]
+}

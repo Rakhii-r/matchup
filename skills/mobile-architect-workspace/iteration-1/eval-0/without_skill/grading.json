@@ -1,0 +1,35 @@
+{
+  "eval_id": 0,
+  "eval_name": "flutter-supabase-auth-flow",
+  "variant": "without_skill",
+  "pass_rate": 0.6,
+  "passed": 3,
+  "total": 5,
+  "expectations": [
+    {
+      "text": "Response contains an 'Architectural Blueprint' section with prose explanation before any code",
+      "passed": false,
+      "evidence": "No 'architectural blueprint' section found"
+    },
+    {
+      "text": "Code uses flutter_secure_storage or platform Keychain/Keystore \u2014 never SharedPreferences for tokens",
+      "passed": true,
+      "evidence": "Secure storage mechanism referenced"
+    },
+    {
+      "text": "No // TODO or // implement later comments in the code",
+      "passed": true,
+      "evidence": "No // TODO placeholders found"
+    },
+    {
+      "text": "Response ends with an 'Architectural Verification' bullet list",
+      "passed": false,
+      "evidence": "No 'architectural verification' section found"
+    },
+    {
+      "text": "Token refresh / expiry edge case is addressed in code or verification",
+      "passed": true,
+      "evidence": "Token refresh handling found"
+    }
+  ]
+}

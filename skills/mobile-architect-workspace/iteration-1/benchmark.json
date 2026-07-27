@@ -1,0 +1,492 @@
+{
+  "metadata": {
+    "skill_name": "mobile-architect",
+    "skill_path": "skills/mobile-architect",
+    "executor_model": "claude-sonnet-4-6",
+    "analyzer_model": "claude-sonnet-4-6",
+    "timestamp": "2026-06-24T01:45:04Z",
+    "evals_run": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "runs_per_configuration": 1
+  },
+  "runs": [
+    {
+      "eval_id": 0,
+      "eval_name": "flutter-supabase-auth-flow",
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 5,
+        "failed": 0,
+        "total": 5,
+        "time_seconds": 126.5,
+        "tokens": 26143
+      },
+      "expectations": [
+        {
+          "text": "Response contains an 'Architectural Blueprint' section with prose explanation before any code",
+          "passed": true,
+          "evidence": "Found 'architectural blueprint' heading"
+        },
+        {
+          "text": "Code uses flutter_secure_storage or platform Keychain/Keystore \u2014 never SharedPreferences for tokens",
+          "passed": true,
+          "evidence": "Secure storage mechanism referenced"
+        },
+        {
+          "text": "No // TODO or // implement later comments in the code",
+          "passed": true,
+          "evidence": "No // TODO placeholders found"
+        },
+        {
+          "text": "Response ends with an 'Architectural Verification' bullet list",
+          "passed": true,
+          "evidence": "Found 'architectural verification' heading"
+        },
+        {
+          "text": "Token refresh / expiry edge case is addressed in code or verification",
+          "passed": true,
+          "evidence": "Token refresh handling found"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 0,
+      "eval_name": "flutter-supabase-auth-flow",
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.6,
+        "passed": 3,
+        "failed": 2,
+        "total": 5,
+        "time_seconds": 82.5,
+        "tokens": 21767
+      },
+      "expectations": [
+        {
+          "text": "Response contains an 'Architectural Blueprint' section with prose explanation before any code",
+          "passed": false,
+          "evidence": "No 'architectural blueprint' section found"
+        },
+        {
+          "text": "Code uses flutter_secure_storage or platform Keychain/Keystore \u2014 never SharedPreferences for tokens",
+          "passed": true,
+          "evidence": "Secure storage mechanism referenced"
+        },
+        {
+          "text": "No // TODO or // implement later comments in the code",
+          "passed": true,
+          "evidence": "No // TODO placeholders found"
+        },
+        {
+          "text": "Response ends with an 'Architectural Verification' bullet list",
+          "passed": false,
+          "evidence": "No 'architectural verification' section found"
+        },
+        {
+          "text": "Token refresh / expiry edge case is addressed in code or verification",
+          "passed": true,
+          "evidence": "Token refresh handling found"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 1,
+      "eval_name": "react-native-offline-sync-engine",
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 5,
+        "failed": 0,
+        "total": 5,
+        "time_seconds": 171.8,
+        "tokens": 30709
+      },
+      "expectations": [
+        {
+          "text": "Response has a prose Architectural Blueprint section",
+          "passed": true,
+          "evidence": "Found 'architectural blueprint' heading"
+        },
+        {
+          "text": "Conflict resolution strategy is described and/or implemented",
+          "passed": true,
+          "evidence": "Conflict resolution strategy present"
+        },
+        {
+          "text": "Exponential backoff or retry logic is present in the sync engine",
+          "passed": true,
+          "evidence": "Retry/backoff logic found"
+        },
+        {
+          "text": "No // TODO or placeholder comments",
+          "passed": true,
+          "evidence": "No // TODO placeholders found"
+        },
+        {
+          "text": "Architectural Verification bullets are present at the end",
+          "passed": true,
+          "evidence": "Found 'architectural verification' heading"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 1,
+      "eval_name": "react-native-offline-sync-engine",
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.6,
+        "passed": 3,
+        "failed": 2,
+        "total": 5,
+        "time_seconds": 163.0,
+        "tokens": 27601
+      },
+      "expectations": [
+        {
+          "text": "Response has a prose Architectural Blueprint section",
+          "passed": false,
+          "evidence": "No 'architectural blueprint' section found"
+        },
+        {
+          "text": "Conflict resolution strategy is described and/or implemented",
+          "passed": true,
+          "evidence": "Conflict resolution strategy present"
+        },
+        {
+          "text": "Exponential backoff or retry logic is present in the sync engine",
+          "passed": true,
+          "evidence": "Retry/backoff logic found"
+        },
+        {
+          "text": "No // TODO or placeholder comments",
+          "passed": true,
+          "evidence": "No // TODO placeholders found"
+        },
+        {
+          "text": "Architectural Verification bullets are present at the end",
+          "passed": false,
+          "evidence": "No 'architectural verification' section found"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 2,
+      "eval_name": "flutter-isar-encrypted-storage",
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.8,
+        "passed": 4,
+        "failed": 1,
+        "total": 5,
+        "time_seconds": 122.6,
+        "tokens": 26516
+      },
+      "expectations": [
+        {
+          "text": "Prose Architectural Blueprint section is present",
+          "passed": true,
+          "evidence": "Found 'architectural blueprint' heading"
+        },
+        {
+          "text": "Encryption keys are stored in Keychain/Keystore or flutter_secure_storage, not hardcoded",
+          "passed": true,
+          "evidence": "Secure key storage referenced"
+        },
+        {
+          "text": "A repository class or interface is shown that abstracts the Isar data source from the domain",
+          "passed": true,
+          "evidence": "Repository pattern present"
+        },
+        {
+          "text": "No use of 'dynamic' type without justification in the code",
+          "passed": false,
+          "evidence": "Found 'dynamic' type usage"
+        },
+        {
+          "text": "Architectural Verification bullets at the end",
+          "passed": true,
+          "evidence": "Found 'architectural verification' heading"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 2,
+      "eval_name": "flutter-isar-encrypted-storage",
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.6,
+        "passed": 3,
+        "failed": 2,
+        "total": 5,
+        "time_seconds": 102.3,
+        "tokens": 23738
+      },
+      "expectations": [
+        {
+          "text": "Prose Architectural Blueprint section is present",
+          "passed": false,
+          "evidence": "No 'architectural blueprint' section found"
+        },
+        {
+          "text": "Encryption keys are stored in Keychain/Keystore or flutter_secure_storage, not hardcoded",
+          "passed": true,
+          "evidence": "Secure key storage referenced"
+        },
+        {
+          "text": "A repository class or interface is shown that abstracts the Isar data source from the domain",
+          "passed": true,
+          "evidence": "Repository pattern present"
+        },
+        {
+          "text": "No use of 'dynamic' type without justification in the code",
+          "passed": true,
+          "evidence": "No untyped 'dynamic' found"
+        },
+        {
+          "text": "Architectural Verification bullets at the end",
+          "passed": false,
+          "evidence": "No 'architectural verification' section found"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 3,
+      "eval_name": "swiftui-tca-paginated-list-offline",
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 5,
+        "failed": 0,
+        "total": 5,
+        "time_seconds": 129.3,
+        "tokens": 26803
+      },
+      "expectations": [
+        {
+          "text": "Prose Architectural Blueprint section present before code",
+          "passed": true,
+          "evidence": "Found 'architectural blueprint' heading"
+        },
+        {
+          "text": "Code uses TCA State/Action/Reducer structure",
+          "passed": true,
+          "evidence": "TCA State/Action/Reducer pattern referenced"
+        },
+        {
+          "text": "CoreData (or SwiftData) is used for offline persistence",
+          "passed": true,
+          "evidence": "CoreData/SwiftData offline persistence found"
+        },
+        {
+          "text": "No // TODO or placeholder comments in Swift code",
+          "passed": true,
+          "evidence": "No // TODO placeholders found"
+        },
+        {
+          "text": "Architectural Verification bullets at the end covering edge cases",
+          "passed": true,
+          "evidence": "Found 'architectural verification' heading"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 3,
+      "eval_name": "swiftui-tca-paginated-list-offline",
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.6,
+        "passed": 3,
+        "failed": 2,
+        "total": 5,
+        "time_seconds": 118.0,
+        "tokens": 25184
+      },
+      "expectations": [
+        {
+          "text": "Prose Architectural Blueprint section present before code",
+          "passed": false,
+          "evidence": "No 'architectural blueprint' section found"
+        },
+        {
+          "text": "Code uses TCA State/Action/Reducer structure",
+          "passed": true,
+          "evidence": "TCA State/Action/Reducer pattern referenced"
+        },
+        {
+          "text": "CoreData (or SwiftData) is used for offline persistence",
+          "passed": true,
+          "evidence": "CoreData/SwiftData offline persistence found"
+        },
+        {
+          "text": "No // TODO or placeholder comments in Swift code",
+          "passed": true,
+          "evidence": "No // TODO placeholders found"
+        },
+        {
+          "text": "Architectural Verification bullets at the end covering edge cases",
+          "passed": false,
+          "evidence": "No 'architectural verification' section found"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 4,
+      "eval_name": "github-actions-cicd-flutter-rn",
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 5,
+        "failed": 0,
+        "total": 5,
+        "time_seconds": 151.0,
+        "tokens": 28565
+      },
+      "expectations": [
+        {
+          "text": "Prose blueprint explaining pipeline stages and secret strategy present",
+          "passed": true,
+          "evidence": "Found 'architectural blueprint' heading"
+        },
+        {
+          "text": "Signing certificates/keys are handled via GitHub Secrets or a secrets manager \u2014 not hardcoded",
+          "passed": true,
+          "evidence": "Signing keys handled via secrets/match"
+        },
+        {
+          "text": "Both TestFlight (iOS) and Google Play (Android) deployment steps are present",
+          "passed": true,
+          "evidence": "TestFlight: True, Google Play: True"
+        },
+        {
+          "text": "Slack notification step on success and/or failure is included",
+          "passed": true,
+          "evidence": "Slack notification step present"
+        },
+        {
+          "text": "Architectural Verification bullets present at the end",
+          "passed": true,
+          "evidence": "Found 'architectural verification' heading"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 4,
+      "eval_name": "github-actions-cicd-flutter-rn",
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.6,
+        "passed": 3,
+        "failed": 2,
+        "total": 5,
+        "time_seconds": 109.8,
+        "tokens": 24732
+      },
+      "expectations": [
+        {
+          "text": "Prose blueprint explaining pipeline stages and secret strategy present",
+          "passed": false,
+          "evidence": "No 'architectural blueprint' section found"
+        },
+        {
+          "text": "Signing certificates/keys are handled via GitHub Secrets or a secrets manager \u2014 not hardcoded",
+          "passed": true,
+          "evidence": "Signing keys handled via secrets/match"
+        },
+        {
+          "text": "Both TestFlight (iOS) and Google Play (Android) deployment steps are present",
+          "passed": true,
+          "evidence": "TestFlight: True, Google Play: True"
+        },
+        {
+          "text": "Slack notification step on success and/or failure is included",
+          "passed": true,
+          "evidence": "Slack notification step present"
+        },
+        {
+          "text": "Architectural Verification bullets present at the end",
+          "passed": false,
+          "evidence": "No 'architectural verification' section found"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "run_summary": {
+    "with_skill": {
+      "pass_rate": {
+        "mean": 0.96,
+        "stddev": 0.0894,
+        "min": 0.8,
+        "max": 1.0
+      },
+      "time_seconds": {
+        "mean": 140.24,
+        "stddev": 20.8054,
+        "min": 122.6,
+        "max": 171.8
+      },
+      "tokens": {
+        "mean": 27747.2,
+        "stddev": 1898.8076,
+        "min": 26143,
+        "max": 30709
+      }
+    },
+    "without_skill": {
+      "pass_rate": {
+        "mean": 0.6,
+        "stddev": 0.0,
+        "min": 0.6,
+        "max": 0.6
+      },
+      "time_seconds": {
+        "mean": 115.12,
+        "stddev": 29.8224,
+        "min": 82.5,
+        "max": 163.0
+      },
+      "tokens": {
+        "mean": 24604.4,
+        "stddev": 2129.1616,
+        "min": 21767,
+        "max": 27601
+      }
+    },
+    "delta": {
+      "pass_rate": "+0.36",
+      "time_seconds": "+25.1",
+      "tokens": "+3143"
+    }
+  },
+  "notes": [
+    "with_skill consistently adds 'Architectural Blueprint' and 'Architectural Verification' sections absent in baseline",
+    "without_skill passes 3/5 assertions on every eval \u2014 the 2 structural format assertions always fail",
+    "eval-2 with_skill: 'dynamic' keyword used in Isar collection @Collection annotation (framework-required) \u2014 assertion slightly over-penalises",
+    "Token overhead of skill (~3k tokens/call) is proportional to output depth and detail added"
+  ]
+}

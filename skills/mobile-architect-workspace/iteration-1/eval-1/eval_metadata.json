@@ -1,0 +1,12 @@
+{
+  "eval_id": 1,
+  "eval_name": "react-native-offline-sync-engine",
+  "prompt": "We're building a React Native field-service app. Technicians use it in tunnels and basements with zero connectivity. All job data must be readable and writable offline, then synced to the backend (a REST API) when connectivity resumes. Conflicts should be handled. Walk me through the architecture and give me the core sync engine code.",
+  "assertions": [
+    {"name": "includes-architectural-blueprint", "description": "Response has a prose Architectural Blueprint section"},
+    {"name": "addresses-conflict-resolution", "description": "Conflict resolution strategy is described and/or implemented"},
+    {"name": "uses-retry-backoff", "description": "Exponential backoff or retry logic is present in the sync engine"},
+    {"name": "no-todo-placeholders", "description": "No // TODO or placeholder comments"},
+    {"name": "includes-architectural-verification", "description": "Architectural Verification bullets are present at the end"}
+  ]
+}

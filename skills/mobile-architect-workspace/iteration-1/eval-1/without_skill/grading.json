@@ -1,0 +1,35 @@
+{
+  "eval_id": 1,
+  "eval_name": "react-native-offline-sync-engine",
+  "variant": "without_skill",
+  "pass_rate": 0.6,
+  "passed": 3,
+  "total": 5,
+  "expectations": [
+    {
+      "text": "Response has a prose Architectural Blueprint section",
+      "passed": false,
+      "evidence": "No 'architectural blueprint' section found"
+    },
+    {
+      "text": "Conflict resolution strategy is described and/or implemented",
+      "passed": true,
+      "evidence": "Conflict resolution strategy present"
+    },
+    {
+      "text": "Exponential backoff or retry logic is present in the sync engine",
+      "passed": true,
+      "evidence": "Retry/backoff logic found"
+    },
+    {
+      "text": "No // TODO or placeholder comments",
+      "passed": true,
+      "evidence": "No // TODO placeholders found"
+    },
+    {
+      "text": "Architectural Verification bullets are present at the end",
+      "passed": false,
+      "evidence": "No 'architectural verification' section found"
+    }
+  ]
+}

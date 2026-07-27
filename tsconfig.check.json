@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "skipLibCheck": true, "noEmit": true, "types": ["node"] },
+  "include": [
+    "app/(tabs)/available.tsx",
+    "app/(tabs)/index.tsx",
+    "app/(tabs)/profile.tsx",
+    "app/(admin)/venues.tsx"
+  ]
+}

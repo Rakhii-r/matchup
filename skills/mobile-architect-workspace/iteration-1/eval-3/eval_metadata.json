@@ -1,0 +1,12 @@
+{
+  "eval_id": 3,
+  "eval_name": "swiftui-tca-paginated-list-offline",
+  "prompt": "I'm building a SwiftUI iOS app (iOS 16+) with The Composable Architecture (TCA). I need a feature that shows a paginated list of products fetched from a REST API, supports pull-to-refresh, handles errors gracefully with a retry button, and stores the last successful response in CoreData so the list is available offline. Show me the TCA feature structure and the full implementation.",
+  "assertions": [
+    {"name": "includes-architectural-blueprint", "description": "Prose Architectural Blueprint section present before code"},
+    {"name": "uses-tca-pattern", "description": "Code uses TCA State/Action/Reducer structure"},
+    {"name": "handles-offline-with-coredata", "description": "CoreData (or SwiftData) is used for offline persistence"},
+    {"name": "no-todo-placeholders", "description": "No // TODO or placeholder comments in Swift code"},
+    {"name": "includes-architectural-verification", "description": "Architectural Verification bullets at the end covering edge cases"}
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "eval_id": 2,
+  "eval_name": "flutter-isar-encrypted-storage",
+  "prompt": "I'm using Flutter with Isar as the local database. I need to store user profile data and sensitive financial records. What's the right way to encrypt the sensitive fields, set up the Isar schema, and make sure the data layer is cleanly separated from my UI? Show me the full pattern.",
+  "assertions": [
+    {"name": "includes-architectural-blueprint", "description": "Prose Architectural Blueprint section is present"},
+    {"name": "uses-secure-key-storage", "description": "Encryption keys are stored in Keychain/Keystore or flutter_secure_storage, not hardcoded"},
+    {"name": "repository-pattern-present", "description": "A repository class or interface is shown that abstracts the Isar data source from the domain"},
+    {"name": "no-dynamic-types", "description": "No use of 'dynamic' type without justification in the code"},
+    {"name": "includes-architectural-verification", "description": "Architectural Verification bullets at the end"}
+  ]
+}

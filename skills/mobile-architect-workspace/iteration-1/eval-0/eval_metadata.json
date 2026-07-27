@@ -1,0 +1,12 @@
+{
+  "eval_id": 0,
+  "eval_name": "flutter-supabase-auth-flow",
+  "prompt": "I'm building a Flutter app and need a solid auth flow. Users sign in with email/password via Supabase. I need to handle token refresh, persist the session securely, and make sure the auth state drives the router (so unauthenticated users can't access protected screens). What's the right architecture and show me the core code?",
+  "assertions": [
+    {"name": "includes-architectural-blueprint", "description": "Response contains an 'Architectural Blueprint' section with prose explanation before any code"},
+    {"name": "uses-secure-storage", "description": "Code uses flutter_secure_storage or platform Keychain/Keystore — never SharedPreferences for tokens"},
+    {"name": "no-todo-placeholders", "description": "No // TODO or // implement later comments in the code"},
+    {"name": "includes-architectural-verification", "description": "Response ends with an 'Architectural Verification' bullet list"},
+    {"name": "handles-token-refresh", "description": "Token refresh / expiry edge case is addressed in code or verification"}
+  ]
+}

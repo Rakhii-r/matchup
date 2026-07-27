@@ -1,0 +1,35 @@
+# Supabase local development config. Run `supabase start` to boot the local stack.
+project_id = "matchup"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+major_version = 15
+
+[studio]
+enabled = true
+port = 54323
+
+[auth]
+enabled = true
+site_url = "matchup://"
+additional_redirect_urls = ["matchup://"]
+jwt_expiry = 3600
+enable_refresh_token_rotation = true
+
+# Phone OTP. In production, configure the MSG91 SMS provider (DLT sender ID) in the
+# Supabase dashboard under Authentication -> Providers -> Phone.
+[auth.sms]
+enable_signup = true
+enable_confirmations = true
+
+[auth.sms.test_otp]
+# Local-only fixed OTPs so you can sign in without a real SMS provider.
+# Format: "<phone>" = "<code>". Remove for staging/production.
+"+919000000000" = "123456"

@@ -1,0 +1,35 @@
+{
+  "eval_id": 2,
+  "eval_name": "flutter-isar-encrypted-storage",
+  "variant": "with_skill",
+  "pass_rate": 0.8,
+  "passed": 4,
+  "total": 5,
+  "expectations": [
+    {
+      "text": "Prose Architectural Blueprint section is present",
+      "passed": true,
+      "evidence": "Found 'architectural blueprint' heading"
+    },
+    {
+      "text": "Encryption keys are stored in Keychain/Keystore or flutter_secure_storage, not hardcoded",
+      "passed": true,
+      "evidence": "Secure key storage referenced"
+    },
+    {
+      "text": "A repository class or interface is shown that abstracts the Isar data source from the domain",
+      "passed": true,
+      "evidence": "Repository pattern present"
+    },
+    {
+      "text": "No use of 'dynamic' type without justification in the code",
+      "passed": false,
+      "evidence": "Found 'dynamic' type usage"
+    },
+    {
+      "text": "Architectural Verification bullets at the end",
+      "passed": true,
+      "evidence": "Found 'architectural verification' heading"
+    }
+  ]
+}
