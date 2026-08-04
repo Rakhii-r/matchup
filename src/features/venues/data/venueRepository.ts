@@ -28,6 +28,12 @@ export const venueRepository = {
     return data ?? [];
   },
 
+  async getById(id: string): Promise<Venue | null> {
+    const { data, error } = await supabase.from('venues').select('*').eq('id', id).maybeSingle();
+    if (error) throw toAppError(error);
+    return data;
+  },
+
   async create(input: CreateVenueInput): Promise<Venue> {
     const { data, error } = await supabase
       .from('venues')

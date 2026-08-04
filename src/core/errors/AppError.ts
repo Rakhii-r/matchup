@@ -49,6 +49,20 @@ export function toAppError(error: unknown): AppError {
   const status = e.status;
   const raw = (e.message ?? '').toLowerCase();
 
+  // A mobile build can be updated before its accompanying Supabase migration.
+  // Make that deployment mismatch actionable instead of hiding it behind the
+  // generic unknown-error message.
+  if (
+    e.code === 'PGRST204' ||
+    (raw.includes('match_name') && (raw.includes('column') || raw.includes('schema cache')))
+  ) {
+    return new AppError(
+      'unknown',
+      'The match database update is not installed yet. Please apply the latest Supabase migrations.',
+      error,
+    );
+  }
+
   let code: AppErrorCode = 'unknown';
   if (raw.includes('network') || raw.includes('fetch')) code = 'network';
   // GoTrue returns HTTP 403 for expired/invalid OTP tokens too (error_code: 'otp_expired').

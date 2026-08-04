@@ -72,8 +72,10 @@ export const availabilityRepository = {
     if (rows.length === 0) return [];
 
     const ids = [...new Set(rows.map((r) => r.user_id))];
+    // public_profiles, not profiles: the base table is self-read only after the
+    // security_hardening migration, and these are other people's rows.
     const { data: profiles, error: profileError } = await supabase
-      .from('profiles')
+      .from('public_profiles')
       .select('id, full_name, area_name')
       .in('id', ids);
     if (profileError) throw toAppError(profileError);

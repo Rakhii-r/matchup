@@ -6,6 +6,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { queryClient } from '@core/api/queryClient';
 import { AuthProvider } from '@core/auth/AuthProvider';
 import { ThemeProvider } from '@shared/theme/ThemeContext';
+import { MatchJoinAlerts } from '@features/matches/presentation/MatchJoinAlerts';
 
 /** Composition root for app-wide providers. Wraps the router in _layout.tsx. */
 export function AppProviders({ children }: { children: ReactNode }): ReactNode {
@@ -14,7 +15,10 @@ export function AppProviders({ children }: { children: ReactNode }): ReactNode {
       <SafeAreaProvider>
         <ThemeProvider>
           <QueryClientProvider client={queryClient}>
-            <AuthProvider>{children}</AuthProvider>
+            <AuthProvider>
+              <MatchJoinAlerts />
+              {children}
+            </AuthProvider>
           </QueryClientProvider>
         </ThemeProvider>
       </SafeAreaProvider>

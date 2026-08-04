@@ -21,6 +21,17 @@ const EnvSchema = z.object({
   posthogHost: z.string().url().optional().default('https://app.posthog.com'),
   sentryDsn: z.string().optional().default(''),
   appEnv: z.enum(['development', 'staging', 'production']).default('development'),
+  /**
+   * Seed the nearby feed with fake matches so a client demo never sees an empty
+   * screen. Off unless explicitly set to 'true' — note this is a string compare,
+   * not z.coerce.boolean(), because coercion treats the literal string 'false'
+   * as true. Ignored entirely in production builds (see `showDemoMatches`).
+   */
+  demoMatches: z
+    .string()
+    .optional()
+    .default('false')
+    .transform((v) => v.trim().toLowerCase() === 'true'),
 });
 
 const parsed = EnvSchema.safeParse({
@@ -30,6 +41,7 @@ const parsed = EnvSchema.safeParse({
   posthogHost: readEnv('posthogHost', 'EXPO_PUBLIC_POSTHOG_HOST'),
   sentryDsn: readEnv('sentryDsn', 'EXPO_PUBLIC_SENTRY_DSN'),
   appEnv: readEnv('appEnv', 'EXPO_PUBLIC_APP_ENV'),
+  demoMatches: readEnv('demoMatches', 'EXPO_PUBLIC_DEMO_MATCHES'),
 });
 
 if (!parsed.success) {
@@ -43,3 +55,10 @@ if (!parsed.success) {
 export const env = parsed.data;
 export const isProd = env.appEnv === 'production';
 export const isDev = env.appEnv === 'development';
+
+/**
+ * Whether fake matches may appear in the nearby feed. Belt and braces: even if
+ * EXPO_PUBLIC_DEMO_MATCHES=true leaks into a production build's env, real users
+ * never see invented matches.
+ */
+export const showDemoMatches = env.demoMatches && !isProd;

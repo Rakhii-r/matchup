@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Alert,
   Animated,
   FlatList,
   Image,
@@ -12,9 +13,16 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { MotiView } from 'moti';
 import { useRouter } from 'expo-router';
 
+import { showDemoMatches } from '@core/config/env';
 import { getCurrentCoords } from '@core/location/location';
 import type { Coords } from '@core/location/location';
-import { useMyMatches, useNearbyMatches } from '@features/matches/presentation/useMatches';
+import { AppError } from '@core/errors/AppError';
+import {
+  useMyMatches,
+  useNearbyMatches,
+  useRequestToJoinAny,
+} from '@features/matches/presentation/useMatches';
+import { DEMO_MATCHES, isDemoMatch } from '@features/matches/domain/demoMatches';
 import { SPORT_LABEL } from '@features/matches/domain/matchSchema';
 import type { Match } from '@features/matches/domain/matchSchema';
 import type { MatchStatus, Sport } from '@shared/types/database.types';
@@ -181,20 +189,57 @@ export default function NearbyScreen(): React.ReactNode {
   const nearby = useNearbyMatches(coords, sport);
   const myMatches = useMyMatches();
 
-  // Real rows only, de-duplicated. When there are none, the empty state shows.
-  const list = useMemo<Match[]>(() => dedupeById(nearby.data ?? []), [nearby.data]);
+  // Real rows, de-duplicated. Fake rows are appended only in demo mode
+  // (EXPO_PUBLIC_DEMO_MATCHES=true, never in production) so a client walkthrough
+  // doesn't open on an empty screen. When both are empty, the empty state shows.
+  const list = useMemo<Match[]>(() => {
+    const real = nearby.data ?? [];
+    return dedupeById(showDemoMatches ? [...real, ...DEMO_MATCHES] : real);
+  }, [nearby.data]);
 
   const goCreate = () =>
     router.push({ pathname: '/match/create', params: sport ? { sport } : {} });
 
   const openMatch = (item: Match) => {
+    // Demo rows have no database row behind them, so the detail screen would
+    // just report "could not be found". Say so plainly instead.
+    if (isDemoMatch(item.id)) {
+      Alert.alert('Sample match', 'This is placeholder data for the demo and cannot be joined.');
+      return;
+    }
     router.push({ pathname: '/match/[id]', params: { id: item.id } });
+  };
+
+  // Ask to join straight from a card, without a detour through the detail
+  // screen. On success we open the match so the player can watch their request
+  // move through the organiser's queue.
+  const joinAny = useRequestToJoinAny();
+  const [joiningId, setJoiningId] = useState<string | null>(null);
+
+  const onJoinPress = async (item: Match): Promise<void> => {
+    if (isDemoMatch(item.id)) {
+      Alert.alert('Sample match', 'This is placeholder data for the demo and cannot be joined.');
+      return;
+    }
+    if (joiningId) return;
+    setJoiningId(item.id);
+    try {
+      await joinAny.mutateAsync(item.id);
+      router.push({ pathname: '/match/[id]', params: { id: item.id } });
+    } catch (e) {
+      Alert.alert(
+        'Could not join',
+        e instanceof AppError ? e.message : 'Something went wrong. Please try again.',
+      );
+    } finally {
+      setJoiningId(null);
+    }
   };
 
   // Which non-list state (if any) to show under the header. When null, the list
   // of match cards renders instead.
   const busy = locating || (coords != null && nearby.isLoading);
-  const showCards = !busy && !nearby.isError && !(coords != null && list.length === 0);
+  const showCards = !busy && !nearby.isError && list.length > 0;
   const data = showCards ? list : [];
 
   const renderItem = ({ item }: { item: Match }) => {
@@ -202,7 +247,7 @@ export default function NearbyScreen(): React.ReactNode {
     const total = item.total_slots;
     const pct = total > 0 ? Math.min(1, filled / total) : 0;
     const isOpen = item.status === 'open';
-    const title = item.notes?.trim() ? item.notes.trim() : SPORT_LABEL[item.sport];
+    const title = item.match_name;
     return (
       <ScalePressable onPress={() => openMatch(item)} style={styles.card}>
         <View style={styles.cardTop}>
@@ -252,9 +297,12 @@ export default function NearbyScreen(): React.ReactNode {
           <View style={[styles.progressFill, { width: `${Math.round(pct * 100)}%` }]} />
         </View>
 
-        <ScalePressable onPress={() => openMatch(item)} style={styles.joinBtn}>
+        <ScalePressable
+          onPress={() => (isOpen ? void onJoinPress(item) : openMatch(item))}
+          style={[styles.joinBtn, !isOpen || joiningId != null ? styles.joinBtnDisabled : null]}
+        >
           <AppText variant="label" color={M.text}>
-            Join Match
+            {joiningId === item.id ? 'Requesting…' : isOpen ? 'Join Match' : 'View'}
           </AppText>
         </ScalePressable>
       </ScalePressable>
@@ -566,6 +614,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: 'rgba(34,197,94,0.10)',
   },
+  joinBtnDisabled: { opacity: 0.5 },
   emptyCard: {
     alignItems: 'center',
     padding: S.xl,

@@ -1,8 +1,9 @@
-import { useMemo } from 'react';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { useMemo, useState } from 'react';
+import { ActivityIndicator, Alert, StyleSheet, View } from 'react-native';
 import { Stack, useLocalSearchParams } from 'expo-router';
 
 import { useAuthStore } from '@core/auth/authStore';
+import { AppError } from '@core/errors/AppError';
 import {
   useAttendance,
   useAttendanceActions,
@@ -11,6 +12,7 @@ import {
   useMatchStatus,
   useMyMembership,
   usePlayerActions,
+  useRequestToJoin,
 } from '@features/matches/presentation/useMatches';
 import type { PlayerWithProfile } from '@features/matches/data/matchRepository';
 import { PLAYER_STATUS_LABEL, SPORT_LABEL } from '@features/matches/domain/matchSchema';
@@ -51,9 +53,35 @@ export default function MatchDetailScreen(): React.ReactNode {
   const playerActions = usePlayerActions(matchId);
   const matchStatus = useMatchStatus(matchId);
   const attendanceActions = useAttendanceActions(matchId);
+  const requestToJoin = useRequestToJoin(matchId);
+  const [joinError, setJoinError] = useState<string | null>(null);
 
   const data = match.data;
   const isCreator = Boolean(data && userId && data.creator_id === userId);
+
+  const onRequestToJoin = async (): Promise<void> => {
+    setJoinError(null);
+    try {
+      await requestToJoin.mutateAsync();
+    } catch (e) {
+      setJoinError(e instanceof AppError ? e.message : 'Could not join that match.');
+    }
+  };
+
+  const onCancelMatch = (): void => {
+    Alert.alert(
+      'Cancel this match?',
+      'Everyone who joined will lose their place and the match will stop showing to nearby players. This cannot be undone.',
+      [
+        { text: 'Keep match', style: 'cancel' },
+        {
+          text: 'Cancel match',
+          style: 'destructive',
+          onPress: () => matchStatus.cancel.mutate(),
+        },
+      ],
+    );
+  };
 
   const attendedById = useMemo(
     () => new Map((attendance.data ?? []).map((a) => [a.user_id, a.attended])),
@@ -91,20 +119,38 @@ export default function MatchDetailScreen(): React.ReactNode {
   const canManage = data.status === 'open' || data.status === 'locked';
   const canMarkAttendance = data.status === 'locked' || data.status === 'completed';
   const actionsBusy = playerActions.setStatus.isPending || playerActions.remove.isPending;
+  const isCancelled = data.status === 'cancelled';
+  // A stranger who arrived from the nearby feed or a shared link: not the
+  // organiser, and not yet in the queue. This is the only state that offers the
+  // join action — once they have a membership row the status card takes over.
+  const canRequestToJoin =
+    !isCreator && !membership.isLoading && !membership.data && data.status === 'open';
 
   return (
     <Screen scroll>
-      <Stack.Screen options={{ title: SPORT_LABEL[data.sport] }} />
+      <Stack.Screen options={{ title: data.match_name }} />
+
+      {isCancelled ? (
+        <View style={styles.cancelledBanner}>
+          <AppText variant="label" color={colors.textInverse}>
+            This match was cancelled
+          </AppText>
+          <AppText variant="caption" color={colors.textInverse}>
+            The organiser called it off. It no longer appears to nearby players.
+          </AppText>
+        </View>
+      ) : null}
 
       <View style={styles.card}>
         <View style={styles.cardHead}>
-          <AppText variant="heading">{SPORT_LABEL[data.sport]}</AppText>
+          <AppText variant="heading">{data.match_name}</AppText>
           <View style={[styles.badge, { backgroundColor: STATUS_COLOR[data.status] }]}>
             <AppText variant="caption" color={colors.textInverse}>
               {data.status}
             </AppText>
           </View>
         </View>
+        <AppText variant="caption" muted>{SPORT_LABEL[data.sport]}</AppText>
         {data.venue_text ? <AppText muted>{data.venue_text}</AppText> : null}
         <AppText>{formatWhen(data.scheduled_at)}</AppText>
         <AppText variant="caption" muted>
@@ -124,6 +170,31 @@ export default function MatchDetailScreen(): React.ReactNode {
           </View>
         ) : null}
       </View>
+
+      {canRequestToJoin ? (
+        <View style={styles.card}>
+          <AppText variant="label">Want in?</AppText>
+          <AppText variant="caption" muted>
+            The organiser reviews requests and confirms the final team. You&apos;ll see your
+            status here once you ask to join.
+          </AppText>
+          <Button
+            label="Request to join"
+            loading={requestToJoin.isPending}
+            onPress={() => void onRequestToJoin()}
+          />
+          {joinError ? (
+            <AppText variant="caption" color={colors.danger}>
+              {joinError}
+            </AppText>
+          ) : null}
+          <ReportBlockBar
+            targetUserId={data.creator_id}
+            matchId={data.id}
+            targetLabel="organiser"
+          />
+        </View>
+      ) : null}
 
       {!isCreator && membership.data ? (
         <View style={styles.card}>
@@ -247,6 +318,14 @@ export default function MatchDetailScreen(): React.ReactNode {
                 onPress={() => matchStatus.complete.mutate()}
               />
             ) : null}
+            {canManage ? (
+              <Button
+                label="Cancel match"
+                variant="danger"
+                loading={matchStatus.cancel.isPending}
+                onPress={onCancelMatch}
+              />
+            ) : null}
           </View>
         </View>
       ) : null}
@@ -272,6 +351,13 @@ const styles = StyleSheet.create({
     marginBottom: spacing.lg,
   },
   cardHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  cancelledBanner: {
+    gap: 2,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.danger,
+    marginBottom: spacing.lg,
+  },
   badge: { paddingHorizontal: spacing.sm, paddingVertical: 2, borderRadius: radius.pill },
   codeBox: {
     marginTop: spacing.sm,

@@ -31,6 +31,7 @@ export type AnalyticsEvent =
   | 'player_needed_sent'
   | 'interest_approved'
   | 'team_locked'
+  | 'match_cancelled'
   | 'attendance_marked'
   | 'available_toggled'
   | 'user_reported'

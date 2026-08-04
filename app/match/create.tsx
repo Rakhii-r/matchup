@@ -15,6 +15,7 @@ import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { AppError } from '@core/errors/AppError';
 import { useCreateMatch } from '@features/matches/presentation/useMatches';
 import { CreateMatchSchema } from '@features/matches/domain/matchSchema';
+import { useVenues } from '@features/venues/presentation/useVenues';
 import type { Sport } from '@shared/types/database.types';
 import { M, R, S } from '@shared/theme/mockTheme';
 import { AppText } from '@shared/ui/AppText';
@@ -26,7 +27,6 @@ import {
   IconHelp,
   IconMinus,
   IconPlus,
-  IconSearch,
   IconSend,
 } from '@shared/ui/icons';
 
@@ -107,28 +107,37 @@ export default function CreateMatchScreen(): React.ReactNode {
   const router = useRouter();
   const params = useLocalSearchParams<{ sport?: string }>();
   const create = useCreateMatch();
+  const venues = useVenues();
 
   const preselected: Sport | null =
     params.sport === 'box_cricket' || params.sport === 'badminton' ? params.sport : null;
 
   const [sport, setSport] = useState<Sport | null>(preselected);
+  const [matchName, setMatchName] = useState('');
   const [formatIdx, setFormatIdx] = useState<number | null>(null);
   const [overs, setOvers] = useState<number | null>(null);
   const [available, setAvailable] = useState(1);
   const [dayOffset, setDayOffset] = useState<number | null>(null);
   const [time, setTime] = useState<{ h: number; m: number } | null>(null);
-  const [venue, setVenue] = useState('');
+  const [venueId, setVenueId] = useState<string | null>(null);
   const [notes, setNotes] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   const [showDate, setShowDate] = useState(false);
   const [showTime, setShowTime] = useState(false);
+  const [showVenue, setShowVenue] = useState(false);
 
   const showSportPicker = preselected === null;
   const isCricket = sport === 'box_cricket';
   const FORMATS = FORMATS_BY_SPORT[sport ?? 'box_cricket'];
   const total = formatIdx !== null ? (FORMATS[formatIdx]?.total ?? 0) : 0;
   const needed = total > 0 ? Math.max(1, total - available) : 0;
+  const availableVenues = useMemo(
+    () => (venues.data ?? []).filter((item) => sport && item.sport_types.includes(sport)),
+    [sport, venues.data],
+  );
+  const selectedVenue = availableVenues.find((item) => item.id === venueId) ?? null;
+  const now = new Date();
 
   // Keep "available" inside [1, total-1] whenever the format changes.
   const clampAvailable = (next: number): number => {
@@ -138,17 +147,19 @@ export default function CreateMatchScreen(): React.ReactNode {
 
   const timeHHmm = time ? `${String(time.h).padStart(2, '0')}:${String(time.m).padStart(2, '0')}` : '';
 
-  const validation = useMemo(() => {
+  const validation = (() => {
+    if (matchName.trim().length < 2) return { ok: false, msg: 'Enter a match name' };
     if (!sport) return { ok: false, msg: 'Pick a sport' };
     if (formatIdx === null) return { ok: false, msg: 'Choose a match format' };
     if (isCricket && overs === null) return { ok: false, msg: 'Choose the number of overs' };
     if (dayOffset === null) return { ok: false, msg: 'Pick a date' };
     if (!time) return { ok: false, msg: 'Pick a time' };
-    if (venue.trim().length < 2) return { ok: false, msg: 'Enter a venue or area' };
+    if (!selectedVenue) return { ok: false, msg: 'Select a venue' };
 
     const composed = CreateMatchSchema.safeParse({
+      matchName: matchName.trim(),
       sport,
-      venueText: venue.trim(),
+      venueId: selectedVenue.id,
       dayOffset,
       timeHHmm,
       totalSlots: total,
@@ -162,10 +173,10 @@ export default function CreateMatchScreen(): React.ReactNode {
     if (dayOffset === 0) {
       const chosen = new Date();
       chosen.setHours(time.h, time.m, 0, 0);
-      if (chosen.getTime() <= Date.now()) return { ok: false, msg: 'Pick a time later today' };
+      if (chosen.getTime() <= now.getTime()) return { ok: false, msg: 'Pick a time later today' };
     }
     return { ok: true, msg: '' };
-  }, [sport, formatIdx, overs, isCricket, dayOffset, time, venue, timeHHmm, total, needed, notes]);
+  })();
 
   const onSubmit = async (): Promise<void> => {
     setError(null);
@@ -180,8 +191,9 @@ export default function CreateMatchScreen(): React.ReactNode {
 
     try {
       const match = await create.mutateAsync({
+        matchName: matchName.trim(),
         sport,
-        venueText: venue.trim(),
+        venueId: selectedVenue?.id ?? '',
         dayOffset,
         timeHHmm,
         totalSlots: total,
@@ -195,7 +207,6 @@ export default function CreateMatchScreen(): React.ReactNode {
   };
 
   // Time picker restricts to the future when the selected day is today.
-  const now = new Date();
   const minHour = dayOffset === 0 ? now.getHours() : 0;
 
   return (
@@ -217,6 +228,17 @@ export default function CreateMatchScreen(): React.ReactNode {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
+        <SectionLabel>MATCH NAME</SectionLabel>
+        <TextInput
+          value={matchName}
+          onChangeText={setMatchName}
+          placeholder="e.g. Sunday Box Cricket"
+          placeholderTextColor={M.faint}
+          style={styles.nameInput}
+          maxLength={80}
+          returnKeyType="done"
+        />
+
         {/* Sport */}
         {showSportPicker ? (
           <>
@@ -229,6 +251,7 @@ export default function CreateMatchScreen(): React.ReactNode {
                     key={key}
                     onPress={() => {
                       setSport(key);
+                      setVenueId(null);
                       setOvers(null);
                       setFormatIdx(null);
                       setAvailable(1);
@@ -370,17 +393,32 @@ export default function CreateMatchScreen(): React.ReactNode {
 
         {/* Venue */}
         <SectionLabel>VENUE</SectionLabel>
-        <View style={styles.searchField}>
-          <IconSearch color={M.muted} size={18} />
-          <TextInput
-            value={venue}
-            onChangeText={setVenue}
-            placeholder="Search sports ground or court..."
-            placeholderTextColor={M.faint}
-            style={styles.searchInput}
-            returnKeyType="done"
-          />
-        </View>
+        <Pressable
+          style={styles.searchField}
+          onPress={() => {
+            if (venues.isError) void venues.refetch();
+            setShowVenue(true);
+          }}
+          disabled={!sport || venues.isLoading}
+          accessibilityRole="button"
+        >
+          <View style={{ flex: 1 }}>
+            <AppText color={selectedVenue ? M.text : M.muted}>
+              {venues.isLoading
+                ? 'Loading venues…'
+                : selectedVenue?.name ?? (sport ? 'Select a venue' : 'Select a sport first')}
+            </AppText>
+            {selectedVenue?.address ? (
+              <AppText variant="caption" color={M.muted}>{selectedVenue.address}</AppText>
+            ) : null}
+          </View>
+          <AppText color={M.muted}>⌄</AppText>
+        </Pressable>
+        {venues.isError ? (
+          <AppText variant="caption" color={M.danger} style={{ marginTop: S.sm }}>
+            Could not load venues. Tap the field to retry.
+          </AppText>
+        ) : null}
 
         {/* Description */}
         <SectionLabel>DESCRIPTION</SectionLabel>
@@ -418,6 +456,41 @@ export default function CreateMatchScreen(): React.ReactNode {
           <IconSend color="#06230F" size={18} />
         </Pressable>
       </View>
+
+      {/* Date picker modal */}
+      <Modal transparent visible={showVenue} animationType="slide" onRequestClose={() => setShowVenue(false)}>
+        <Pressable style={styles.sheetBackdrop} onPress={() => setShowVenue(false)} />
+        <View style={styles.sheet}>
+          <View style={styles.sheetHead}>
+            <AppText variant="heading" color={M.text}>Select venue</AppText>
+            <Pressable hitSlop={10} onPress={() => setShowVenue(false)}>
+              <IconClose color={M.muted} size={20} />
+            </Pressable>
+          </View>
+          <ScrollView style={{ maxHeight: 360 }} showsVerticalScrollIndicator={false}>
+            {availableVenues.length === 0 ? (
+              <AppText color={M.muted} style={{ paddingVertical: S.lg }}>
+                No database venues support this sport yet.
+              </AppText>
+            ) : availableVenues.map((item) => {
+              const on = item.id === venueId;
+              return (
+                <Pressable
+                  key={item.id}
+                  style={[styles.pickerRow, on && styles.pickerRowOn]}
+                  onPress={() => {
+                    setVenueId(item.id);
+                    setShowVenue(false);
+                  }}
+                >
+                  <AppText variant="label" color={on ? M.green : M.text}>{item.name}</AppText>
+                  {item.address ? <AppText variant="caption" color={M.muted}>{item.address}</AppText> : null}
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        </View>
+      </Modal>
 
       {/* Date picker modal */}
       <Modal transparent visible={showDate} animationType="slide" onRequestClose={() => setShowDate(false)}>
@@ -628,7 +701,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: S.md,
     minHeight: 52,
   },
-  searchInput: { flex: 1, marginLeft: S.sm, color: M.text, fontSize: 15 },
+  nameInput: {
+    backgroundColor: M.card,
+    borderRadius: R.md,
+    borderWidth: 1,
+    borderColor: M.border,
+    paddingHorizontal: S.md,
+    minHeight: 52,
+    color: M.text,
+    fontSize: 15,
+  },
   textArea: {
     backgroundColor: M.card,
     borderRadius: R.md,

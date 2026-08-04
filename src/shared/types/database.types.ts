@@ -79,6 +79,7 @@ export interface Database {
         Row: {
           id: string;
           creator_id: string;
+          match_name: string;
           sport: Sport;
           venue_id: string | null;
           venue_text: string | null;
@@ -95,6 +96,7 @@ export interface Database {
         };
         Insert: {
           creator_id: string;
+          match_name: string;
           sport: Sport;
           scheduled_at: string;
           total_slots: number;
@@ -232,6 +234,22 @@ export interface Database {
         Row: { user_id: string; role: AppRole };
         Relationships: [];
       };
+      /**
+       * Non-PII projection of `profiles`, active users only. This is the ONLY
+       * way to read another user's profile — the base table is self-read after
+       * the security_hardening migration. No phone, no home coordinates.
+       */
+      public_profiles: {
+        Row: {
+          id: string;
+          full_name: string;
+          area_name: string | null;
+          avatar_url: string | null;
+          sport_pref: Sport[];
+          created_at: string;
+        };
+        Relationships: [];
+      };
     };
     Functions: {
       nearby_matches: {
@@ -251,6 +269,10 @@ export interface Database {
           in_sport?: Sport | null;
         };
         Returns: Database['public']['Tables']['availability']['Row'][];
+      };
+      join_match: {
+        Args: { in_match_id: string; in_joined_via?: JoinedVia };
+        Returns: Database['public']['Tables']['match_players']['Row'];
       };
       has_role: { Args: { in_role: AppRole; uid?: string }; Returns: boolean };
       is_admin: { Args: { uid?: string }; Returns: boolean };

@@ -2,13 +2,13 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { useAuthStore } from '@core/auth/authStore';
 import { AppError } from '@core/errors/AppError';
-import { getCurrentCoords } from '@core/location/location';
 import type { Coords } from '@core/location/location';
 import { analytics } from '@core/observability/analytics';
 import { matchRepository } from '@features/matches/data/matchRepository';
 import { buildScheduledAt } from '@features/matches/domain/matchSchema';
 import type { CreateMatchForm, Match } from '@features/matches/domain/matchSchema';
 import type { PlayerStatus, Sport } from '@shared/types/database.types';
+import { venueRepository } from '@features/venues/data/venueRepository';
 
 const matchKey = (id: string) => ['match', id] as const;
 const playersKey = (id: string) => ['match', id, 'players'] as const;
@@ -83,8 +83,6 @@ export function useNearbyMatches(coords: Coords | null, sport: Sport | null) {
 export function useCreateMatch() {
   const qc = useQueryClient();
   const userId = useAuthStore((s) => s.session?.user.id);
-  const profile = useAuthStore((s) => s.profile);
-
   return useMutation({
     mutationFn: async (form: CreateMatchForm): Promise<Match> => {
       if (!userId) throw new AppError('unauthorized', 'Please sign in again.');
@@ -94,28 +92,23 @@ export function useCreateMatch() {
         throw new AppError('validation', 'Pick a time in the future.');
       }
 
-      const deviceCoords = await getCurrentCoords();
-      const coords =
-        deviceCoords ??
-        (profile?.home_lat != null && profile?.home_lng != null
-          ? { lat: profile.home_lat, lng: profile.home_lng }
-          : null);
-      if (!coords) {
-        throw new AppError(
-          'validation',
-          'Enable location, or set your home area in your profile, to create a match.',
-        );
+      const venue = await venueRepository.getById(form.venueId);
+      if (!venue) throw new AppError('validation', 'Select a venue from the list.');
+      if (!venue.sport_types.includes(form.sport)) {
+        throw new AppError('validation', 'That venue does not support the selected sport.');
       }
 
       return matchRepository.create({
         creatorId: userId,
+        matchName: form.matchName,
         sport: form.sport,
-        venueText: form.venueText,
+        venueId: venue.id,
+        venueText: venue.name,
         scheduledAt: when.toISOString(),
         totalSlots: form.totalSlots,
         missingCount: form.missingCount,
-        lat: coords.lat,
-        lng: coords.lng,
+        lat: venue.lat,
+        lng: venue.lng,
         notes: form.notes ?? null,
       });
     },
@@ -126,8 +119,22 @@ export function useCreateMatch() {
   });
 }
 
-export function useJoinByCode() {
+/**
+ * Invalidate everything that changes when the current user joins a match: the
+ * match row itself (filled_slots moves), the roster, and my own membership.
+ */
+function useInvalidateAfterJoin() {
   const qc = useQueryClient();
+  const userId = useAuthStore((s) => s.session?.user.id);
+  return (matchId: string) => {
+    void qc.invalidateQueries({ queryKey: matchKey(matchId) });
+    void qc.invalidateQueries({ queryKey: playersKey(matchId) });
+    void qc.invalidateQueries({ queryKey: membershipKey(matchId, userId) });
+  };
+}
+
+export function useJoinByCode() {
+  const invalidate = useInvalidateAfterJoin();
   const userId = useAuthStore((s) => s.session?.user.id);
 
   return useMutation({
@@ -136,22 +143,57 @@ export function useJoinByCode() {
 
       const match = await matchRepository.getByShareCode(code);
       if (!match) throw new AppError('not_found', 'No match found for that code.');
-      if (match.creator_id === userId) {
-        throw new AppError('conflict', 'This is your own match.');
-      }
-      if (match.status !== 'open') {
-        throw new AppError('conflict', 'That match is no longer open to join.');
-      }
 
-      const existing = await matchRepository.getMyMembership(match.id, userId);
-      if (!existing) {
-        await matchRepository.join(match.id, userId);
-        analytics.capture('join_requested', { match_id: match.id });
-      }
+      // Every eligibility rule (own match, not open, already started, full,
+      // blocked) is enforced inside join_match under a row lock. Re-checking
+      // here would only duplicate it, and the client's copy of the match can
+      // already be stale by the time the user taps.
+      await matchRepository.join(match.id, 'code');
+      analytics.capture('join_requested', { match_id: match.id, via: 'code' });
       return match;
     },
-    onSuccess: (match) => {
-      void qc.invalidateQueries({ queryKey: matchKey(match.id) });
+    onSuccess: (match) => invalidate(match.id),
+  });
+}
+
+/**
+ * Request to join a match the user found by browsing (nearby list or a direct
+ * link), rather than by entering a share code. Lands in the organiser's queue
+ * as 'interested' — same approve/confirm flow as a code join.
+ */
+export function useRequestToJoin(matchId: string) {
+  const invalidate = useInvalidateAfterJoin();
+  const userId = useAuthStore((s) => s.session?.user.id);
+
+  return useMutation({
+    mutationFn: async (): Promise<void> => {
+      if (!userId) throw new AppError('unauthorized', 'Please sign in again.');
+      await matchRepository.join(matchId, 'browse');
+    },
+    onSuccess: () => {
+      analytics.capture('join_requested', { match_id: matchId, via: 'browse' });
+      invalidate(matchId);
+    },
+  });
+}
+
+/**
+ * Same as {@link useRequestToJoin}, but the match is a mutation variable rather
+ * than bound at hook time — for lists, where one hook has to serve every row.
+ */
+export function useRequestToJoinAny() {
+  const invalidate = useInvalidateAfterJoin();
+  const userId = useAuthStore((s) => s.session?.user.id);
+
+  return useMutation({
+    mutationFn: async (matchId: string): Promise<string> => {
+      if (!userId) throw new AppError('unauthorized', 'Please sign in again.');
+      await matchRepository.join(matchId, 'browse');
+      return matchId;
+    },
+    onSuccess: (matchId) => {
+      analytics.capture('join_requested', { match_id: matchId, via: 'browse' });
+      invalidate(matchId);
     },
   });
 }
@@ -178,10 +220,16 @@ export function usePlayerActions(matchId: string) {
   return { setStatus, remove };
 }
 
-/** Lifecycle transitions on the match itself: lock the team, complete the match. */
+/** Lifecycle transitions on the match itself: lock, complete, cancel. */
 export function useMatchStatus(matchId: string) {
   const qc = useQueryClient();
-  const invalidate = () => qc.invalidateQueries({ queryKey: matchKey(matchId) });
+  const userId = useAuthStore((s) => s.session?.user.id);
+
+  const invalidate = () => {
+    void qc.invalidateQueries({ queryKey: matchKey(matchId) });
+    // "My matches" filters out cancelled rows, so it has to be refetched too.
+    void qc.invalidateQueries({ queryKey: ['matches', 'mine', userId ?? 'anon'] });
+  };
 
   const lock = useMutation({
     mutationFn: () => matchRepository.setStatus(matchId, 'locked'),
@@ -196,7 +244,20 @@ export function useMatchStatus(matchId: string) {
     onSuccess: invalidate,
   });
 
-  return { lock, complete };
+  /**
+   * Call the match off. Terminal and irreversible — there is no un-cancel, so
+   * the UI must confirm before calling this. Cancelled matches drop out of both
+   * the nearby feed (the RPC only returns 'open') and "My matches".
+   */
+  const cancel = useMutation({
+    mutationFn: () => matchRepository.setStatus(matchId, 'cancelled'),
+    onSuccess: () => {
+      analytics.capture('match_cancelled', { match_id: matchId });
+      invalidate();
+    },
+  });
+
+  return { lock, complete, cancel };
 }
 
 export function useAttendanceActions(matchId: string) {

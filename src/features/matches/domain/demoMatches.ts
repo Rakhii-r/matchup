@@ -102,6 +102,7 @@ const SEEDS: DemoSeed[] = [
 export const DEMO_MATCHES: Match[] = SEEDS.map((seed) => ({
   id: seed.id,
   creator_id: `demo-creator-${seed.id}`,
+  match_name: seed.name,
   sport: seed.sport,
   venue_id: null,
   venue_text: seed.venue,

@@ -10,8 +10,9 @@ export const SportEnum = z.enum(['box_cricket', 'badminton']);
 /** Create-match form. Day/time are chip selections that compose into scheduled_at. */
 export const CreateMatchSchema = z
   .object({
+    matchName: z.string().trim().min(2, 'Enter a match name').max(80),
     sport: SportEnum,
-    venueText: z.string().trim().min(2, 'Enter a venue or area').max(120),
+    venueId: z.string().uuid('Select a venue'),
     dayOffset: z.number().int().min(0, 'Pick a day').max(13),
     timeHHmm: z.string().regex(/^([01]\d|2[0-3]):([0-5]\d)$/, 'Pick a time'),
     totalSlots: z.number().int().min(2, 'At least 2 players').max(40),

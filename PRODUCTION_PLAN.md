@@ -4,6 +4,83 @@
 
 **Where you actually are:** the architecture doc describes the *destination*. The code has ~70% of the backend spine (schema, RLS, repositories, hooks) and ~40% of the frontend (auth + create/join match work; profile creation and 3 of 4 tabs are unwired mockups). Several things the doc promises don't exist yet: Edge Functions (`notify-wave`), FCM registration, Realtime, tests, CI, git. This plan sequences what remains.
 
+> **Implementation update — 3 August 2026:** The status snapshot above was written on 5 July and is retained for historical context. The completed work below is now the authoritative current state for match discovery, creation, venue selection, joining, and approval notifications.
+
+## 0. Implemented Match Workflow (Current State)
+
+### Completed application changes
+
+- **ESLint configuration:** added the Expo and Prettier ESLint configuration in `.eslintrc.cjs`. TypeScript typechecking passes. The project still has separate pre-existing React 19 lint findings around React Native `Animated.Value` refs and effect state updates.
+- **Nearby match lifecycle filtering:** Nearby no longer shows terminal or indefinitely stale matches. The database RPC returns only `open` matches scheduled in the future or within a six-hour ongoing-match window. The repository repeats the cutoff client-side to protect partially deployed environments and stale responses.
+- **Database-only venue selection:** manual venue entry was removed from Create Match. Users select from a dropdown populated by the `venues` table. The list is filtered to venues supporting the selected sport.
+- **Authoritative venue data:** match creation re-fetches the chosen venue by ID before insertion. It stores `venue_id`, the database venue name, and the venue's database latitude/longitude. Device coordinates are no longer incorrectly used as match coordinates.
+- **Required match name:** Create Match now requires a dedicated name of 2–80 characters. It is stored in `matches.match_name` and displayed on Nearby cards and the match-detail screen. Description/format notes remain separate.
+- **Secure join requests:** code and browse joins use the transactional `join_match` database RPC. It rejects unauthenticated/inactive accounts, own-match joins, closed or started matches, full matches, and invalid join sources. Duplicate requests are idempotent.
+- **Creator approval workflow:** joining creates an `interested` membership. The creator can accept it as `approved`, reject/remove it, and later confirm the player from the match-detail screen.
+- **Realtime creator popup:** while signed in and the app is active, a creator receives a Supabase Realtime popup when a player requests to join. The popup includes an **Accept** action; the request also remains on the match-detail screen if the creator chooses **Later** or was offline.
+- **Realtime player popup:** when the creator changes the membership to `approved`, the requesting player receives a realtime acceptance popup and the relevant TanStack Query data is invalidated.
+- **Actionable deployment errors:** if the mobile code is ahead of the database schema (for example, `match_name` is missing), the UI now reports that the latest Supabase migrations must be applied instead of showing only a generic error.
+
+### Implemented database migrations
+
+Migration filenames use the timestamp versions recorded by the linked remote Supabase project. Do not rename them back to `0001`, `0002`, and so on; Supabase uses the timestamp prefix as migration identity.
+
+| Migration | Implementation |
+|---|---|
+| `20260803060907_filled_slots_trigger.sql` | Keeps filled-player counts synchronized from confirmed memberships. |
+| `20260803070000_join_match_rpc.sql` | Adds the locked, server-authoritative join RPC and removes direct client inserts into `match_players`. |
+| `20260803070100_hide_expired_nearby_matches.sql` | Excludes stale historical matches from `nearby_matches` while retaining a six-hour ongoing window. |
+| `20260803070200_match_names_and_join_realtime.sql` | Adds `matches.match_name`, validates its length, and enables `match_players` in the Supabase Realtime publication. |
+
+> **Corrected 3 August 2026 (later the same day).** The paragraph that stood here claimed the first eleven local timestamps matched remote. They did not. `security_hardening` had never been applied to the remote project, so remote held ten pre-August entries against eleven local files. Mapping files onto remote timestamps in order, without accounting for that gap, shifted six files down one slot: local `20260721093107` said `security_hardening` while remote said `avatars_storage`, and so on through `filled_slots_trigger`. Because Supabase keys migration identity on the timestamp prefix alone, `migration list` showed matching versions while the contents differed — and `db push` would have skipped `security_hardening` permanently.
+>
+> Resolved: the six files were renamed back onto the timestamps matching their real contents, `security_hardening` was given a new trailing timestamp and applied, and the duplicate `20260803060907` ledger row was removed. Local and remote now agree on both version and content.
+
+### Deployment procedure
+
+From the repository root, verify migration alignment:
+
+```powershell
+npx.cmd supabase migration list
+```
+
+Apply pending migrations:
+
+```powershell
+npx.cmd supabase db push
+```
+
+Before trusting `migration list`, remember it compares **timestamps only** — two files can show as matched while containing entirely different SQL. Confirm content matches too. Use `supabase migration repair` when the ledger genuinely disagrees with what ran (as it did on 3 August), and not otherwise; reverting valid history makes the ledger inaccurate in the opposite direction.
+
+After a successful database push, restart Expo Go without USB debugging:
+
+```powershell
+npx.cmd expo start --go --tunnel --clear
+```
+
+For devices on the same Wi-Fi, LAN mode is faster:
+
+```powershell
+npx.cmd expo start --go --lan --clear
+```
+
+### Acceptance test checklist
+
+1. Create or verify at least one admin-managed venue for each supported sport.
+2. Open Create Match and confirm that no manual venue input is available.
+3. Select a sport and confirm that only compatible database venues appear.
+4. Enter a match name, format, future date/time, venue, and optional description; post the match.
+5. Confirm the new name appears on Nearby and the match-detail screen.
+6. Sign in as a second user and join using the share code or Nearby card.
+7. Confirm the creator receives the interested-player popup and can choose **Accept**.
+8. Confirm the second user receives the accepted popup and sees membership status `Approved`.
+9. Confirm the creator can move the player from `Approved` to `Confirmed`.
+10. Confirm completed/cancelled matches and matches older than the ongoing window do not appear in Nearby.
+
+### Known scope boundary
+
+The implemented alerts are foreground in-app Realtime popups. Reliable alerts while the app is closed or backgrounded still require Expo/FCM device-token registration and a server-side push notification function. That remains a launch-critical item in Phase 1-B below.
+
 ---
 
 ## 1. Tech Stack Recommendation
