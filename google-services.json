@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "172647050661",
+    "project_id": "matchup-d5b9a",
+    "storage_bucket": "matchup-d5b9a.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:172647050661:android:cf8c0e15e519476bbf0c4c",
+        "android_client_info": {
+          "package_name": "com.asrdigi.matchup"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA3Hgby175BUUSse1bg352bKEQHjVt_vPc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -34,7 +34,7 @@ Cross-platform mobile app (iOS + Android) for organising casual **Box Cricket** 
 
 ```
 app/          Expo Router routes only (screens)
-src/features/ feature modules (auth, profile, matches, players, attendance,
+src/features/ feature modules (auth, profile, matches, teams, players, attendance,
               availability, venues, safety, notifications)  each = data/domain/presentation
 src/core/     infra: api, auth, config, storage, realtime, location, notifications,
               network, errors, logging, di, observability
@@ -47,6 +47,17 @@ supabase/     migrations (schema + RLS + PostGIS + RPC), functions, seed.sql
 OTP login · create profile · create/join match · fill missing players (count-based) ·
 approve & confirm · play & mark attended · "I'm available today" · static venue directory
 ("call to confirm") · attendance flag · report & block.
+
+**Teams (added 5 Aug 2026, outside the original phase docs).** Persistent squads:
+`teams` + `team_members`, joined by invite code through the `join_team` RPC.
+`team_challenges` lets one team's owner challenge another by invite code;
+accepting creates a real match and confirms both squads onto it. Note "team" is
+overloaded in this codebase — it also means the confirmed roster of a single
+match (`matches.status = 'locked'`) and, in Phase 2 FR-204, one of the two sides
+within a match. Those are unrelated to `teams`.
+
+See `ROADMAP.md` for how the current product goals map onto the phase docs, and
+which ones are blocked by dependencies rather than effort.
 
 ## NOT in Phase 1 (do not build yet)
 

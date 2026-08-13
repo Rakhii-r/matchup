@@ -12,7 +12,7 @@ export const M = {
   text: '#FFFFFF',
   muted: '#A1A1AA',
   faint: '#6B7075',
-  green: '#22C55E',
+  green: '#98BB01',
   greenDeep: '#2E7D32',
   lime: '#8BC34A',
   chip: '#26272B',

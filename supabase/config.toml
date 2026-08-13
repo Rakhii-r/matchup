@@ -33,3 +33,10 @@ enable_confirmations = true
 # Local-only fixed OTPs so you can sign in without a real SMS provider.
 # Format: "<phone>" = "<code>". Remove for staging/production.
 "+919000000000" = "123456"
+
+# Drains public.notification_jobs and sends via the Expo Push API.
+# Invoked by pg_cron through pg_net, not by the app. verify_jwt stays on: the
+# service role key is a valid JWT, and the function re-checks it is exactly the
+# service role key before touching the queue.
+[functions.notify-wave]
+verify_jwt = true

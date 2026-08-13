@@ -12,7 +12,7 @@ import * as SecureStore from 'expo-secure-store';
 
 import { darkColors, lightColors, type AppColors, type ColorScheme } from '@shared/theme';
 
-const STORAGE_KEY = 'matchup:color_scheme_override';
+const STORAGE_KEY = 'sixfour24:color_scheme_override';
 
 interface ThemeContextValue {
   colors: AppColors;
@@ -50,7 +50,7 @@ export function ThemeProvider({ children }: { children: ReactNode }): ReactNode 
     }
   }, []);
 
-  // The app is a dark-only P24 design, so default to dark regardless of the device
+  // The app is a dark-only sixfour24 design, so default to dark regardless of the device
   // setting; a manual override (if ever exposed) still wins. systemScheme is retained
   // for that future toggle.
   void systemScheme;

@@ -1,6 +1,7 @@
 import { supabase } from '@core/api/supabaseClient';
 import { toAppError } from '@core/errors/AppError';
 import { logger } from '@core/logging/logger';
+import { unregisterForPushNotifications } from '@core/notifications/pushNotifications';
 
 /**
  * Delivery channel for the OTP. 'whatsapp' routes through Twilio's WhatsApp sender
@@ -43,6 +44,11 @@ export const authRepository = {
   },
 
   async signOut(): Promise<void> {
+    // Drop the push token first: unregister_device is scoped by auth.uid(), so
+    // after signOut() there is no way to remove it and the next user of this
+    // phone would receive the previous user's notifications.
+    await unregisterForPushNotifications();
+
     const { error } = await supabase.auth.signOut();
     if (error) throw toAppError(error);
   },

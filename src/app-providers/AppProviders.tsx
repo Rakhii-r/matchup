@@ -5,6 +5,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { queryClient } from '@core/api/queryClient';
 import { AuthProvider } from '@core/auth/AuthProvider';
+import { PushRegistrar } from '@core/notifications/PushRegistrar';
 import { ThemeProvider } from '@shared/theme/ThemeContext';
 import { MatchJoinAlerts } from '@features/matches/presentation/MatchJoinAlerts';
 
@@ -17,6 +18,7 @@ export function AppProviders({ children }: { children: ReactNode }): ReactNode {
           <QueryClientProvider client={queryClient}>
             <AuthProvider>
               <MatchJoinAlerts />
+              <PushRegistrar />
               {children}
             </AuthProvider>
           </QueryClientProvider>

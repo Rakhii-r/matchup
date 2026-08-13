@@ -79,6 +79,10 @@ function RootLayout(): React.ReactNode {
         <Stack.Screen name="(auth)" />
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="(admin)" />
+        {/* headerShown so the screen's own Stack.Screen title renders. */}
+        <Stack.Screen name="matches" options={{ headerShown: true }} />
+        {/* teams has its own _layout that styles the header for the whole group. */}
+        <Stack.Screen name="teams" />
         <Stack.Screen name="profile" options={{ presentation: 'modal' }} />
         <Stack.Screen name="match" options={{ presentation: 'modal' }} />
       </Stack>

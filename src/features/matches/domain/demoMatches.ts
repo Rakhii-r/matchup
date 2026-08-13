@@ -107,6 +107,15 @@ export const DEMO_MATCHES: Match[] = SEEDS.map((seed) => ({
   venue_id: null,
   venue_text: seed.venue,
   scheduled_at: seed.when,
+  // Demo rows are never fixtures and are never scored, so the
+  // head-to-head and format columns are always null.
+  team_a_id: null,
+  team_b_id: null,
+  challenge_id: null,
+  overs: null,
+  scorer_id: null,
+  motm_user_id: null,
+  result_text: null,
   total_slots: seed.total,
   filled_slots: seed.filled,
   missing_count: Math.max(0, seed.total - seed.filled),

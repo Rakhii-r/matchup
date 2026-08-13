@@ -36,6 +36,18 @@ export function useMatchPlayers(matchId: string) {
   });
 }
 
+/**
+ * The two squads in a team fixture. Returns null fields for an ordinary match,
+ * which the roster renders as a single ungrouped list.
+ */
+export function useMatchSides(matchId: string) {
+  return useQuery({
+    queryKey: ['match', matchId, 'sides'] as const,
+    queryFn: () => matchRepository.getSides(matchId),
+    enabled: matchId.length > 0,
+  });
+}
+
 export function useMyMembership(matchId: string) {
   const userId = useAuthStore((s) => s.session?.user.id);
   return useQuery({
@@ -58,6 +70,16 @@ export function useMyMatches() {
   return useQuery({
     queryKey: ['matches', 'mine', userId ?? 'anon'] as const,
     queryFn: () => matchRepository.listMine(userId as string),
+    enabled: Boolean(userId),
+  });
+}
+
+/** Matches the user joined (any queue status), newest request first. */
+export function useJoinedMatches() {
+  const userId = useAuthStore((s) => s.session?.user.id);
+  return useQuery({
+    queryKey: ['matches', 'joined', userId ?? 'anon'] as const,
+    queryFn: () => matchRepository.listJoined(userId as string),
     enabled: Boolean(userId),
   });
 }
@@ -130,7 +152,24 @@ function useInvalidateAfterJoin() {
     void qc.invalidateQueries({ queryKey: matchKey(matchId) });
     void qc.invalidateQueries({ queryKey: playersKey(matchId) });
     void qc.invalidateQueries({ queryKey: membershipKey(matchId, userId) });
+    // The match just entered my joined list — the Matches screen must refetch.
+    void qc.invalidateQueries({ queryKey: ['matches', 'joined', userId ?? 'anon'] });
   };
+}
+
+/**
+ * Answer an invite raised when your squad was booked into a team fixture.
+ * Accepting moves you to 'confirmed', which is the only status that counts
+ * toward filled_slots — so the sheet updates and every join-related query has
+ * to be invalidated, same as a normal join.
+ */
+export function useRespondToMatchInvite(matchId: string) {
+  const invalidate = useInvalidateAfterJoin();
+
+  return useMutation({
+    mutationFn: (accept: boolean) => matchRepository.respondToInvite(matchId, accept),
+    onSuccess: () => invalidate(matchId),
+  });
 }
 
 export function useJoinByCode() {

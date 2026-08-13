@@ -396,6 +396,21 @@ export default function NearbyScreen(): React.ReactNode {
         </ScalePressable>
       </View>
 
+      {/* Full matches list. Deliberately NOT gated on myMatches.length — a user
+          who has only joined matches still needs a way in. */}
+      <View style={styles.linkRow}>
+        <ScalePressable onPress={() => router.push('/matches')} style={styles.linkBtn}>
+          <AppText variant="label" color={M.text} style={{ fontSize: 15 }}>
+            All matches
+          </AppText>
+        </ScalePressable>
+        <ScalePressable onPress={() => router.push('/teams')} style={styles.linkBtn}>
+          <AppText variant="label" color={M.text} style={{ fontSize: 15 }}>
+            Teams
+          </AppText>
+        </ScalePressable>
+      </View>
+
       {/* My matches — matches you created, so you can always get back to them */}
       {(myMatches.data?.length ?? 0) > 0 ? (
         <View style={{ marginBottom: S.lg }}>
@@ -537,6 +552,17 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.35,
     shadowRadius: 12,
     elevation: 6,
+  },
+  linkRow: { flexDirection: 'row', gap: S.sm, marginBottom: S.lg },
+  linkBtn: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: 18,
+    borderWidth: 1.5,
+    borderColor: M.border,
+    backgroundColor: M.card,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   secondaryBtn: {
     flex: 1,

@@ -41,6 +41,7 @@ export const SPORT_LABEL: Record<Sport, string> = {
 
 export const PLAYER_STATUS_LABEL: Record<PlayerStatus, string> = {
   interested: 'Interested',
+  invited: 'Awaiting reply',
   approved: 'Approved',
   rejected: 'Rejected',
   confirmed: 'Confirmed',

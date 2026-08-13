@@ -3,9 +3,12 @@
 export type ColorScheme = 'light' | 'dark';
 
 export const lightColors = {
-  primary: '#1F4E79',
-  primaryDark: '#163A5A',
-  accent: '#2E75B6',
+  // sixfour24 brand chartreuse. #98BB01 on white fails WCAG AA for small text,
+  // so it is used for fills and never for body copy — text on it is textInverse
+  // (near-black), which passes comfortably.
+  primary: '#98BB01',
+  primaryDark: '#5A7400',
+  accent: '#98BB01',
   success: '#2E7D32',
   danger: '#C62828',
   warning: '#ED6C02',
@@ -17,12 +20,14 @@ export const lightColors = {
   textInverse: '#FFFFFF',
 } as const;
 
-// Dark palette aligned to the P24 mockup tokens (see mockTheme.ts) so the shared
+// Dark palette aligned to the sixfour24 mockup tokens (see mockTheme.ts) so the shared
 // components (Screen/Button/TextField/AppText) match the redesigned dark screens.
 export const darkColors = {
-  primary: '#22C55E',
-  primaryDark: '#16A34A',
-  accent: '#22C55E',
+  // Brand chartreuse. `success` stays a separate green: a "match completed"
+  // badge must not be indistinguishable from a primary button.
+  primary: '#98BB01',
+  primaryDark: '#5A7400',
+  accent: '#AEC902',
   success: '#22C55E',
   danger: '#FF7A7A',
   warning: '#FFA726',
@@ -31,14 +36,14 @@ export const darkColors = {
   border: '#2A2B2F',
   text: '#FFFFFF',
   textMuted: '#A1A1AA',
-  textInverse: '#06230F',
+  textInverse: '#141600',
 } as const;
 
 export type AppColors = { readonly [K in keyof typeof lightColors]: string };
 
 /**
  * Static token set used by screens that import `colors` directly (admin, match, etc.).
- * Points at the dark P24 palette so those screens match the redesigned dark app.
+ * Points at the dark sixfour24 palette so those screens match the redesigned dark app.
  * @deprecated Prefer useTheme().colors in new components.
  */
 export const colors = darkColors;

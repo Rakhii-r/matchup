@@ -1,5 +1,5 @@
 /**
- * AnimatedLogo — P24 brand mark with entry sequence + continuous glow pulse.
+ * AnimatedLogo — sixfour24 brand mark with entry sequence + continuous glow pulse.
  *
  * Sequence:
  *   fade in + scale 0.8 → 1  (spring with small overshoot bounce)
@@ -11,11 +11,11 @@ import { Image, StyleSheet, View } from 'react-native';
 import { MotiView, MotiText } from 'moti';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const P24_LOGO = require('../../../../assets/images/logo-p24.png') as number;
+const APP_LOGO = require('../../../../assets/images/sixfour24-logo.png') as number;
 
-// Intrinsic asset is 1038x576 (~1.8:1); keep that ratio when sizing.
+// Intrinsic asset is 1672x941 (~1.78:1); keep that ratio when sizing.
 const LOGO_WIDTH = 220;
-const LOGO_HEIGHT = LOGO_WIDTH / (1038 / 576);
+const LOGO_HEIGHT = LOGO_WIDTH / (1672 / 941);
 
 export function AnimatedLogo(): React.ReactNode {
   return (
@@ -46,23 +46,18 @@ export function AnimatedLogo(): React.ReactNode {
         }}
       >
         <Image
-          source={P24_LOGO}
+          source={APP_LOGO}
           style={styles.logo}
           resizeMode="contain"
           accessibilityRole="image"
-          accessibilityLabel="P24"
+          accessibilityLabel="sixfour24"
         />
       </MotiView>
 
-      {/* App name — fade up */}
-      <MotiView
-        from={{ opacity: 0, translateY: 16 }}
-        animate={{ opacity: 1, translateY: 0 }}
-        transition={{ type: 'timing', duration: 500, delay: 750 }}
-      >
-        <MotiText style={styles.appName}>P24</MotiText>
-      </MotiView>
-
+      {/*
+        No app-name text: the lockup above already contains the wordmark, and
+        rendering it twice read as a mistake. The tagline still fades in.
+      */}
       {/* Tagline — fades in after name */}
       <MotiView
         from={{ opacity: 0 }}

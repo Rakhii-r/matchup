@@ -3,6 +3,18 @@
 .env.*
 !.env.example
 
+# Firebase / Google service account private keys. These grant server-side send
+# rights on your FCM project — leaking one lets anyone push to all your users.
+# They belong in EAS (`eas credentials`), never in the repo.
+#
+# NOTE: google-services.json is deliberately NOT ignored. It is not a secret
+# (it ships inside every APK) and EAS Build reads the project from git, so
+# ignoring it would break the Android build.
+*service-account*.json
+firebase-adminsdk-*.json
+*-firebase-adminsdk-*.json
+service-account-key.json
+
 # Dependencies
 node_modules/
 

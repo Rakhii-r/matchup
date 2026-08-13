@@ -22,7 +22,7 @@ import { AppText } from '@shared/ui/AppText';
 import { OtpBoxInput } from '@shared/ui/OtpBoxInput';
 
 const { height: SCREEN_H } = Dimensions.get('window');
-const RESEND_SECONDS = 30;
+const RESEND_SECONDS = 60;
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const STADIUM_BG = require('../../assets/images/login-screen.png') as number;
