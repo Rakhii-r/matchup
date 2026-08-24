@@ -99,14 +99,33 @@ export function useEndInnings(matchId: string, inningsId: string | null) {
   });
 }
 
+/**
+ * Finish the match. This is the ONLY call that works out the winner and writes
+ * `matches.status = 'completed'`, `result_text` and `motm_user_id`.
+ *
+ * `end_innings` closes an innings row and touches nothing else, so a second
+ * innings ended without this call leaves the match still in progress, with no
+ * result and every read model that keys off status empty. The two always go
+ * together — see the end-of-match sequence in app/match/[id]/score.tsx.
+ *
+ * The invalidations are RETURNED rather than fired and forgotten: react-query
+ * awaits a promise from `onSuccess`, so `mutateAsync` does not resolve until
+ * the match row has been re-read. The result screen therefore paints the
+ * finished row straight away instead of the stale in-progress one.
+ */
 export function useFinishMatch(matchId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (motmUserId: string | null) =>
       scoringRepository.finishMatch(matchId, motmUserId),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: liveKey(matchId) });
-      void qc.invalidateQueries({ queryKey: ['match', matchId] });
-    },
+    onSuccess: () =>
+      Promise.all([
+        // Prefix key — also covers ['match', id, 'live' | 'players' | 'sides'],
+        // so liveKey does not need listing separately.
+        qc.invalidateQueries({ queryKey: ['match', matchId] }),
+        // The Matches tab and the Home dashboard both render match status.
+        qc.invalidateQueries({ queryKey: ['matches'] }),
+        qc.invalidateQueries({ queryKey: ['dashboard'] }),
+      ]),
   });
 }

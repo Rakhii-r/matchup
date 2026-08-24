@@ -3,7 +3,7 @@
  * Each dot scales 1→1.5→1 in a loop, offset by 200ms.
  * Appears after logo entrance is complete (delay: 1100ms).
  */
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet } from 'react-native';
 import { MotiView } from 'moti';
 
 const DOTS = [0, 1, 2] as const;

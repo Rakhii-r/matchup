@@ -20,7 +20,16 @@ export type PlayerStatus =
   | 'rejected'
   | 'confirmed';
 export type JoinedVia = 'code' | 'browse' | 'alert' | 'challenge';
-export type TeamRole = 'owner' | 'member';
+// Which creation engine made the fixture, and therefore which rules apply.
+// 'team_vs_team' — posted by a team owner, opponent found by the radar search.
+// 'open'         — Post a Match: no teams at all, individuals take seats.
+// NOT NULL with a 'team_vs_team' default, so a row that predates the column
+// reads as the flow that actually created it.
+export type MatchType = 'team_vs_team' | 'open';
+// Why this person is on the sheet. Display metadata only: every authority check
+// reads matches.creator_id, never this.
+export type MatchPlayerRole = 'creator' | 'player';
+export type TeamRole = 'owner' | 'vice_captain' | 'member';
 // 'open'    — posted with no addressee; the matcher offers it to ranked teams.
 // 'expired' — an open challenge nobody accepted before its start time.
 export type ChallengeStatus =
@@ -31,13 +40,22 @@ export type ChallengeStatus =
   | 'cancelled'
   | 'expired';
 
-export type CandidateStatus = 'offered' | 'accepted' | 'expired';
+export type CandidateStatus = 'offered' | 'interested' | 'accepted' | 'declined' | 'expired';
+
+/**
+ * How seriously the fixture is being played. Stored as `text` with a CHECK and
+ * a `'friendly'` default on both `matches` and `team_challenges`, so a row that
+ * predates the column still reads as a valid value rather than null.
+ */
+export type GameType = 'friendly' | 'competitive';
 
 /**
  * Wides and no-balls are re-bowled and do not advance the over; byes and leg
  * byes do. That single distinction drives over completion, balls faced and
  * bowler economy, so it is modelled once here.
  */
+export type PlayingRole = 'batter' | 'bowler' | 'all_rounder' | 'keeper';
+
 export type ExtraType = 'wide' | 'no_ball' | 'bye' | 'leg_bye';
 
 export type WicketType =
@@ -63,6 +81,12 @@ type Timestamped = { created_at: string };
 export interface Database {
   public: {
     Tables: {
+      sports: {
+        Row: { id: string; sport: Sport; name: string; is_active: boolean; created_at: string; updated_at: string };
+        Insert: { id?: string; sport: Sport; name: string; is_active?: boolean; created_at?: string; updated_at?: string };
+        Update: { name?: string; is_active?: boolean; updated_at?: string };
+        Relationships: [];
+      };
       profiles: {
         Row: {
           id: string;
@@ -104,6 +128,13 @@ export interface Database {
           confirm_note: string;
           created_by: string | null;
           created_at: string;
+          // Added 15 Aug 2026. All nullable: an unpopulated venue renders its
+          // empty state rather than a fabricated rating or price.
+          image_url: string | null;
+          rating: number | null;
+          rating_count: number;
+          price_per_hour: number | null;
+          facilities: string[];
         };
         Insert: {
           name: string;
@@ -114,6 +145,11 @@ export interface Database {
           sport_types?: Sport[];
           phone?: string | null;
           created_by?: string | null;
+          image_url?: string | null;
+          rating?: number | null;
+          rating_count?: number;
+          price_per_hour?: number | null;
+          facilities?: string[];
         };
         Update: Partial<Database['public']['Tables']['venues']['Insert']>;
         Relationships: [];
@@ -126,6 +162,7 @@ export interface Database {
           sport: Sport;
           venue_id: string | null;
           venue_text: string | null;
+          area_name: string | null;
           scheduled_at: string;
           total_slots: number;
           filled_slots: number;
@@ -134,6 +171,8 @@ export interface Database {
           share_code: string;
           lat: number;
           lng: number;
+          match_lat: number | null;
+          match_lng: number | null;
           notes: string | null;
           created_at: string;
           /**
@@ -152,6 +191,18 @@ export interface Database {
           motm_user_id: string | null;
           /** e.g. "ASR WARRIORS won by 12 runs". Written by finish_match. */
           result_text: string | null;
+          /** NOT NULL with a 'friendly' default — never null on a read. */
+          game_type: GameType;
+          /** When the booking ends. timestamptz, null when the organiser left it open. */
+          end_time: string | null;
+          /**
+           * Metres. Set by an open challenge, and by Post a Match — where
+           * nearby_matches actually enforces it, so the poster's Search
+           * Distance chips decide who can discover the fixture.
+           */
+          search_radius_m: number | null;
+          match_type: MatchType;
+          rematch_of: string | null;
         };
         Insert: {
           creator_id: string;
@@ -164,8 +215,16 @@ export interface Database {
           share_code: string;
           venue_id?: string | null;
           venue_text?: string | null;
+          area_name?: string | null;
+          match_lat?: number | null;
+          match_lng?: number | null;
           missing_count?: number;
           notes?: string | null;
+          game_type?: GameType;
+          end_time?: string | null;
+          search_radius_m?: number | null;
+          match_type?: MatchType;
+          rematch_of?: string | null;
         };
         Update: Partial<Database['public']['Tables']['matches']['Insert']> & {
           status?: MatchStatus;
@@ -183,6 +242,12 @@ export interface Database {
           joined_via: JoinedVia;
           /** Which squad this player is on. Null for a non-fixture match. */
           team_id: string | null;
+          /**
+           * 'creator' on the single row create_open_match writes for the host.
+           * A team fixture writes no row for its creator at all, so every row
+           * there is 'player'.
+           */
+          role: MatchPlayerRole;
         };
         Insert: {
           match_id: string;
@@ -190,6 +255,7 @@ export interface Database {
           joined_via?: JoinedVia;
           status?: PlayerStatus;
           team_id?: string | null;
+          role?: MatchPlayerRole;
         };
         Update: { status?: PlayerStatus };
         Relationships: [];
@@ -323,6 +389,9 @@ export interface Database {
           sport: Sport;
           owner_id: string;
           invite_code: string;
+          description: string | null;
+          logo_url: string | null;
+          home_ground: string | null;
           created_at: string;
         };
         Insert: {
@@ -333,7 +402,7 @@ export interface Database {
           invite_code: string;
           created_at?: string;
         };
-        Update: { name?: string; sport?: Sport };
+        Update: { name?: string; sport?: Sport; description?: string | null; logo_url?: string | null; home_ground?: string | null };
         Relationships: [];
       };
       challenge_candidates: {
@@ -367,7 +436,16 @@ export interface Database {
           match_id: string | null;
           created_at: string;
           responded_at: string | null;
+          /** NOT NULL with a 'friendly' default — never null on a read. */
+          game_type: GameType;
+          /** timestamptz, null when the poster left the finish time open. */
+          end_time: string | null;
+          /** How far the matcher was told to look, in metres. */
+          search_radius_m: number | null;
         };
+        // Writes go through post_open_challenge / create_challenge only, so
+        // there is no client-side Insert to widen — the three columns above are
+        // set by the RPC from in_game_type / in_end_time / in_radius_m.
         Insert: never;
         Update: never;
         Relationships: [];
@@ -436,6 +514,39 @@ export interface Database {
         Args: { in_match_id: string; in_joined_via?: JoinedVia };
         Returns: Database['public']['Tables']['match_players']['Row'];
       };
+      /**
+       * Post a Match. Creates the fixture AND seats the caller as its host in
+       * one transaction, so the roster is never momentarily empty. Takes no
+       * team of any kind — that is the whole difference from
+       * post_open_challenge. Signature verified against
+       * pg_get_function_arguments on 18 Aug 2026.
+       */
+      create_open_match: {
+        Args: {
+          in_sport: Sport;
+          in_match_name: string;
+          in_area_name: string;
+          in_scheduled_at: string;
+          in_total_slots: number;
+          /** timestamptz or null when the organiser left the finish open. */
+          in_end_time?: string | null;
+          in_game_type?: GameType;
+          in_radius_m?: number;
+          in_lat?: number | null;
+          in_lng?: number | null;
+          in_venue_id?: string | null;
+        };
+        Returns: Database['public']['Tables']['matches']['Row'];
+      };
+      /**
+       * Take a seat in an open match. Lands on 'confirmed' directly — there is
+       * no approval queue, which is what join_match does instead for a team
+       * fixture. Idempotent: a second call returns the existing row.
+       */
+      join_open_match: {
+        Args: { in_match_id: string; in_joined_via?: JoinedVia };
+        Returns: Database['public']['Tables']['match_players']['Row'];
+      };
       join_team: {
         Args: { in_invite_code: string };
         Returns: Database['public']['Tables']['teams']['Row'];
@@ -488,11 +599,18 @@ export interface Database {
         Args: {
           in_from_team_id: string;
           in_match_name: string;
-          in_venue_id: string;
+          in_area_name: string;
           in_scheduled_at: string;
           in_total_slots: number;
           in_message?: string | null;
           in_radius_m?: number;
+          /** Defaults to 'friendly' server-side. */
+          in_game_type?: GameType;
+          /** timestamptz or null. Verified against pg_get_function_arguments. */
+          in_end_time?: string | null;
+          in_lat?: number | null;
+          in_lng?: number | null;
+          in_venue_id?: string | null;
         };
         Returns: Database['public']['Tables']['team_challenges']['Row'];
       };
@@ -514,10 +632,180 @@ export interface Database {
           avatar_url: string | null;
           status: PlayerStatus;
           joined_via: JoinedVia;
+          role: MatchPlayerRole;
           team_id: string | null;
           team_name: string | null;
           side: 'a' | 'b' | null;
           created_at: string;
+        }[];
+      };
+      get_player_stats: {
+        Args: { in_user_id?: string | null };
+        Returns: {
+          user_id: string;
+          full_name: string | null;
+          area_name: string | null;
+          avatar_url: string | null;
+          playing_role: PlayingRole | null;
+          matches_played: number;
+          wins: number;
+          win_rate: number;
+          runs: number;
+          wickets: number;
+          motm: number;
+        }[];
+      };
+      // Per-completed-match batting card for the Profile statistics screen.
+      // Verified against pg_get_function_result on 17 Aug 2026:
+      //   TABLE(match_id uuid, match_name text, played_at timestamptz,
+      //         opponent_name text, outcome text, overs integer, runs integer,
+      //         balls integer, fours integer, sixes integer, is_out boolean,
+      //         strike_rate numeric, is_motm boolean)
+      // Nullable for real reasons, not defensiveness: `opponent_name` is a LEFT
+      // JOIN onto teams (an open match has no named opponent), `overs` is
+      // nullable on `matches` (fixtures that predate in-app scoring), and
+      // `strike_rate` divides by `nullif(balls, 0)`, so a match where the
+      // player never faced a ball returns null rather than 0.
+      get_player_batting_history: {
+        Args: { in_user_id?: string | null; in_limit?: number };
+        Returns: {
+          match_id: string;
+          match_name: string;
+          played_at: string;
+          opponent_name: string | null;
+          outcome: 'won' | 'lost' | 'tied';
+          overs: number | null;
+          runs: number;
+          balls: number;
+          fours: number;
+          sixes: number;
+          is_out: boolean;
+          strike_rate: number | null;
+          is_motm: boolean;
+        }[];
+      };
+      // These three mirror the deployed function signatures exactly. Verified
+      // against pg_get_function_result on 15 Aug 2026 — the previous shapes
+      // named columns (captain_id, team_a_name, my_runs) the functions never
+      // returned, which read as undefined at runtime with no type error.
+      get_team_overview: {
+        Args: { in_team_id: string };
+        Returns: { id: string; name: string; sport: Sport; invite_code: string; created_at: string; description: string | null; logo_url: string | null; home_ground: string | null; owner_id: string; captain_name: string | null; captain_avatar: string | null; player_count: number; my_role: TeamRole | null; i_am_owner: boolean }[];
+      };
+      // Every figure the Teams tab shows, for every team the caller belongs to,
+      // in one round trip. Replaces a get_team_overview + get_team_stats pair
+      // per rendered card.
+      get_my_teams_overview: {
+        Args: Record<string, never>;
+        Returns: { id: string; name: string; sport: Sport; invite_code: string; logo_url: string | null; home_ground: string | null; player_count: number; my_role: TeamRole; i_am_owner: boolean; matches_played: number; wins: number; losses: number; ties: number; win_rate: number }[];
+      };
+      get_team_stats: {
+        Args: { in_team_id: string };
+        Returns: { team_id: string; matches_played: number; wins: number; losses: number; ties: number; win_rate: number; highest_score: number | null; lowest_score: number | null }[];
+      };
+      get_team_fixtures: {
+        Args: { in_team_id: string };
+        Returns: { match_id: string; match_name: string; scheduled_at: string; venue_text: string | null; status: MatchStatus; is_upcoming: boolean; opponent_id: string | null; opponent_name: string | null; is_home: boolean; our_runs: number | null; our_wickets: number | null; their_runs: number | null; their_wickets: number | null; outcome: 'won' | 'lost' | 'tied' | null; result_text: string | null }[];
+      };
+      set_member_role: {
+        Args: { in_team_id: string; in_user_id: string; in_role: 'member' | 'vice_captain' };
+        Returns: Database['public']['Tables']['team_members']['Row'];
+      };
+      decline_open_challenge: { Args: { in_challenge_id: string; in_team_id: string }; Returns: Database['public']['Tables']['challenge_candidates']['Row'] };
+      /**
+       * The offer ledger for one open challenge, with each candidate team's
+       * public facts resolved server-side.
+       *
+       * Selecting challenge_candidates and embedding `team:teams(name)` cannot
+       * do this: `teams` is members-only under RLS, and the poster is by
+       * definition not a member of the teams being offered to, so every
+       * embedded name comes back NULL. This function is SECURITY DEFINER and
+       * gated internally on `is_challenge_poster(in_challenge_id)`, so only the
+       * poster gets rows and nothing else about `teams` is widened.
+       *
+       * Shape verified against pg_get_function_result. `logo_url` is null until
+       * the team uploads one; `responded_at` is null while status is 'offered'.
+       */
+      get_challenge_candidates: {
+        Args: { in_challenge_id: string };
+        Returns: {
+          candidate_id: string;
+          team_id: string;
+          team_name: string;
+          logo_url: string | null;
+          sport: string;
+          player_count: number;
+          matches_played: number;
+          wins: number;
+          losses: number;
+          ties: number;
+          /** Whole percent, already rounded server-side. */
+          win_rate: number;
+          rank: number;
+          distance_m: number;
+          status: CandidateStatus;
+          responded_at: string | null;
+          /**
+           * True when the signed-in user OWNS this candidate team. A user with
+           * two squads can legitimately have one offered the other's fixture,
+           * and `accept_open_challenge` checks the ACCEPTING team's owner — so
+           * this, not "am I the poster", is what decides whether Accept and
+           * Reject can be shown on a candidate row.
+           */
+          i_own_team: boolean;
+        }[];
+      };
+      get_my_next_match: {
+        Args: Record<string, never>;
+        Returns: {
+          match_id: string;
+          match_name: string;
+          scheduled_at: string;
+          venue_text: string | null;
+          status: MatchStatus;
+          team_a_id: string | null;
+          team_a_name: string | null;
+          team_b_id: string | null;
+          team_b_name: string | null;
+          my_status: PlayerStatus;
+          confirmed_count: number;
+          total_slots: number;
+        }[];
+      };
+      get_my_recent_matches: {
+        Args: { in_limit?: number };
+        Returns: {
+          match_id: string;
+          match_name: string;
+          played_at: string;
+          my_team_id: string | null;
+          my_team_name: string | null;
+          opponent_name: string | null;
+          my_runs: number | null;
+          their_runs: number | null;
+          outcome: 'won' | 'lost' | 'tied';
+          result_text: string | null;
+        }[];
+      };
+      list_my_notifications: {
+        Args: { in_limit?: number };
+        Returns: {
+          id: string;
+          kind: string;
+          title: string;
+          body: string;
+          route: string | null;
+          created_at: string;
+        }[];
+      };
+      get_my_pending_actions: {
+        Args: Record<string, never>;
+        Returns: {
+          kind: string;
+          title: string;
+          subtitle: string | null;
+          route: string | null;
+          urgency: 'high' | 'medium' | 'low';
         }[];
       };
       start_innings: {
@@ -630,6 +918,25 @@ export interface Database {
           decided_at: string | null;
         };
       };
+      /**
+       * Re-roll. perform_toss is idempotent by design and cannot re-roll, so
+       * this is the only path that changes a toss. Captain-only, and refused
+       * once `decision` is set.
+       */
+      redo_toss: {
+        Args: { in_match_id: string };
+        // match_toss has no Tables entry — it is reached only through the toss
+        // RPCs — so the row shape is stated here.
+        Returns: {
+          match_id: string;
+          called_by: string;
+          winner_team_id: string;
+          outcome: 'heads' | 'tails';
+          decision: 'bat' | 'bowl' | null;
+          created_at: string;
+          decided_at: string | null;
+        };
+      };
       set_toss_decision: {
         Args: { in_match_id: string; in_decision: 'bat' | 'bowl' };
         Returns: Database['public']['Functions']['perform_toss']['Returns'];
@@ -687,6 +994,43 @@ export interface Database {
       has_role: { Args: { in_role: AppRole; uid?: string }; Returns: boolean };
       is_admin: { Args: { uid?: string }; Returns: boolean };
       is_superadmin: { Args: { uid?: string }; Returns: boolean };
+      create_rematch: {
+        Args: { in_match_id: string };
+        Returns: Database['public']['Tables']['matches']['Row'];
+      };
+      cleanup_my_open_fixtures: {
+        Args: Record<string, never>;
+        Returns: number;
+      };
+      apply_to_open_challenge: {
+        Args: { in_challenge_id: string; in_team_id: string };
+        Returns: Database['public']['Tables']['challenge_candidates']['Row'];
+      };
+      list_open_challenges_nearby: {
+        Args: {
+          in_lat?: number | null;
+          in_lng?: number | null;
+          in_radius_m?: number;
+          in_sport?: string | null;
+        };
+        Returns: {
+          challenge_id: string;
+          match_name: string;
+          from_team_id: string;
+          from_team_name: string;
+          from_team_logo: string | null;
+          sport: string;
+          venue_id: string | null;
+          venue_name: string;
+          area_name: string;
+          scheduled_at: string;
+          total_slots: number;
+          message: string | null;
+          distance_m: number;
+          created_at: string;
+          applied_status: string | null;
+        }[];
+      };
     };
     Enums: { app_role: AppRole };
     CompositeTypes: { [_ in never]: never };

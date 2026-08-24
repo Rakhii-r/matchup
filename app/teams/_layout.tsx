@@ -1,8 +1,10 @@
 import { Stack } from 'expo-router';
 
-import { colors } from '@shared/theme';
+import { useTheme } from '@shared/theme/ThemeContext';
 
 export default function TeamsLayout(): React.ReactNode {
+  const { colors } = useTheme();
+
   return (
     <Stack
       screenOptions={{

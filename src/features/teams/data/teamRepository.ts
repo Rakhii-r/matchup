@@ -4,7 +4,11 @@ import type { AppErrorCode } from '@core/errors/AppError';
 import { logger } from '@core/logging/logger';
 import { generateShareCode } from '@features/matches/domain/matchSchema';
 import type { Team, TeamMemberWithProfile } from '@features/teams/domain/teamSchema';
-import type { Sport } from '@shared/types/database.types';
+import type { Database, Sport } from '@shared/types/database.types';
+
+/** One row of the Teams tab list — team identity plus its aggregated record. */
+export type TeamOverviewRow =
+  Database['public']['Functions']['get_my_teams_overview']['Returns'][number];
 
 /**
  * `join_team` signals refusals with a stable token as the error message (see the
@@ -54,6 +58,19 @@ export const teamRepository = {
     throw new AppError('conflict', 'Could not generate a unique invite code. Please try again.');
   },
 
+  async uploadLogo(teamId: string, base64: string): Promise<string> {
+    const binary = atob(base64); const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+    const path = `${teamId}/logo.jpg`;
+    const { error } = await supabase.storage.from('team-logos').upload(path, bytes, { contentType: 'image/jpeg', upsert: true });
+    if (error) throw toAppError(error);
+    const { data } = supabase.storage.from('team-logos').getPublicUrl(path);
+    const url = `${data.publicUrl}?v=${Date.now()}`;
+    const { error: updateError } = await supabase.from('teams').update({ logo_url: url }).eq('id', teamId);
+    if (updateError) throw toAppError(updateError);
+    return url;
+  },
+
   /** Teams the user belongs to. RLS already limits rows to their memberships. */
   async listMine(): Promise<Team[]> {
     const { data, error } = await supabase
@@ -73,6 +90,46 @@ export const teamRepository = {
       .maybeSingle();
     if (error) throw toAppError(error);
     return data;
+  },
+
+  /**
+   * Every team the user belongs to, with roster size and results already
+   * aggregated server-side — one round trip regardless of team count. The
+   * function filters on auth.uid() internally, so there is no team id to pass
+   * and nothing for the client to authorise.
+   */
+  async listMineOverview(): Promise<TeamOverviewRow[]> {
+    const { data, error } = await supabase.rpc('get_my_teams_overview', {});
+    if (error) throw toAppError(error);
+    return data ?? [];
+  },
+
+  async getOverview(teamId: string) {
+    const { data, error } = await supabase.rpc('get_team_overview', { in_team_id: teamId });
+    if (error) throw toAppError(error);
+    return data?.[0] ?? null;
+  },
+
+  async getStats(teamId: string) {
+    const { data, error } = await supabase.rpc('get_team_stats', { in_team_id: teamId });
+    if (error) throw toAppError(error);
+    return data?.[0] ?? null;
+  },
+
+  async getFixtures(teamId: string) {
+    const { data, error } = await supabase.rpc('get_team_fixtures', { in_team_id: teamId });
+    if (error) throw toAppError(error);
+    return data ?? [];
+  },
+
+  async update(teamId: string, input: { name: string; description: string; homeGround: string }) {
+    const { error } = await supabase.from('teams').update({ name: input.name, description: input.description || null, home_ground: input.homeGround || null }).eq('id', teamId);
+    if (error) throw toAppError(error);
+  },
+
+  async setMemberRole(teamId: string, userId: string, role: 'member' | 'vice_captain') {
+    const { error } = await supabase.rpc('set_member_role', { in_team_id: teamId, in_user_id: userId, in_role: role });
+    if (error) throw toAppError(error);
   },
 
   /**

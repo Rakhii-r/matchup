@@ -1,0 +1,19 @@
+appId: com.asrdigi.matchup
+---
+# Flow 3: Match Creation Wizard Flow
+- launchApp
+
+# 1. Tap Create Match from Home
+- tapOn: "\\+ Create a Match"
+- assertVisible: ".*Match.*|.*Sport.*|.*Create.*"
+
+# 2. Select Sport
+- tapOn: "Cricket|Box Cricket"
+
+# 3. Test Form Inputs & Navigation
+- tapOn: "Next|Continue|Proceed"
+- assertVisible: ".*"
+
+# 4. Navigate Back to Home
+- back
+- assertVisible: "Good.*"

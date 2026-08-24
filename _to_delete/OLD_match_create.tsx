@@ -17,7 +17,7 @@ import { useCreateMatch } from '@features/matches/presentation/useMatches';
 import { CreateMatchSchema } from '@features/matches/domain/matchSchema';
 import { useVenues } from '@features/venues/presentation/useVenues';
 import type { Sport } from '@shared/types/database.types';
-import { M, R, S } from '@shared/theme/mockTheme';
+import { R, S, useMock, type MockPalette } from '@shared/theme/mockTheme';
 import { AppText } from '@shared/ui/AppText';
 import {
   IconBack,
@@ -29,13 +29,12 @@ import {
   IconPlus,
   IconSend,
 } from '@shared/ui/icons';
+import { SPORT_IMAGE } from '@shared/ui/sportImages';
 
-/* eslint-disable @typescript-eslint/no-require-imports */
 const SPORTS: { key: Sport; label: string; image: number }[] = [
-  { key: 'box_cricket', label: 'Cricket', image: require('../../assets/images/cricket.jpg') as number },
-  { key: 'badminton', label: 'Badminton', image: require('../../assets/images/badminton.jpg') as number },
+  { key: 'box_cricket', label: 'Cricket', image: SPORT_IMAGE.box_cricket },
+  { key: 'badminton', label: 'Badminton', image: SPORT_IMAGE.badminton },
 ];
-/* eslint-enable @typescript-eslint/no-require-imports */
 
 /** Team format → total players on the sheet (both sides), per sport. */
 const FORMATS_BY_SPORT: Record<Sport, { label: string; total: number }[]> = {
@@ -72,6 +71,8 @@ function to12h(hh: number, mm: number): string {
 }
 
 function SectionLabel({ children }: { children: string }): React.ReactNode {
+  const M = useMock();
+  const styles = useMemo(() => makeStyles(M), [M]);
   return (
     <AppText variant="caption" color={M.faint} style={styles.sectionLabel}>
       {children}
@@ -88,6 +89,8 @@ function Chip({
   on: boolean;
   onPress: () => void;
 }): React.ReactNode {
+  const M = useMock();
+  const styles = useMemo(() => makeStyles(M), [M]);
   return (
     <Pressable onPress={onPress} accessibilityRole="button" accessibilityState={{ selected: on }}>
       <MotiView
@@ -95,7 +98,7 @@ function Chip({
         transition={{ type: 'timing', duration: 160 }}
         style={styles.chip}
       >
-        <AppText variant="label" color={on ? '#06230F' : M.text}>
+        <AppText variant="label" color={on ? M.limeInk : M.text}>
           {label}
         </AppText>
       </MotiView>
@@ -104,6 +107,8 @@ function Chip({
 }
 
 export default function CreateMatchScreen(): React.ReactNode {
+  const M = useMock();
+  const styles = useMemo(() => makeStyles(M), [M]);
   const router = useRouter();
   const params = useLocalSearchParams<{ sport?: string }>();
   const create = useCreateMatch();
@@ -358,7 +363,7 @@ export default function CreateMatchScreen(): React.ReactNode {
                 style={[styles.stepBtn, styles.stepBtnOn]}
                 onPress={() => setAvailable((a) => clampAvailable(a + 1))}
               >
-                <IconPlus color="#06230F" size={18} />
+                <IconPlus color={M.limeInk} size={18} />
               </Pressable>
             </View>
           </View>
@@ -450,10 +455,10 @@ export default function CreateMatchScreen(): React.ReactNode {
           onPress={onSubmit}
           accessibilityRole="button"
         >
-          <AppText variant="label" color="#06230F" style={{ fontSize: 16, marginRight: S.sm }}>
+          <AppText variant="label" color={M.limeInk} style={{ fontSize: 16, marginRight: S.sm }}>
             {create.isPending ? 'Posting…' : 'Post Match'}
           </AppText>
-          <IconSend color="#06230F" size={18} />
+          <IconSend color={M.limeInk} size={18} />
         </Pressable>
       </View>
 
@@ -582,7 +587,7 @@ export default function CreateMatchScreen(): React.ReactNode {
             disabled={!time}
             onPress={() => setShowTime(false)}
           >
-            <AppText variant="label" color="#06230F" style={{ fontSize: 15 }}>
+            <AppText variant="label" color={M.limeInk} style={{ fontSize: 15 }}>
               Done
             </AppText>
           </Pressable>
@@ -592,7 +597,7 @@ export default function CreateMatchScreen(): React.ReactNode {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (M: MockPalette) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: M.bg },
   header: {
     flexDirection: 'row',

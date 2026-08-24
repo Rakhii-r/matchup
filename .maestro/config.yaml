@@ -1,0 +1,14 @@
+# Maestro E2E Master Configuration
+# SixFour24 (Matchup) Mobile App
+# Run entire suite: maestro test .maestro/
+# Run individual flow: maestro test .maestro/01_home_and_calendar.yaml
+
+appId: com.asrdigi.matchup
+# For Expo Go testing, replace appId with: host.exp.exponent
+---
+- runFlow: 01_home_and_calendar.yaml
+- runFlow: 02_matches_feed.yaml
+- runFlow: 03_create_match.yaml
+- runFlow: 04_live_radar.yaml
+- runFlow: 05_venues_directory.yaml
+- runFlow: 06_profile_and_theme.yaml

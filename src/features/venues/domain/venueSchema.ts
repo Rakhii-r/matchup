@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import type { Database, Sport } from '@shared/types/database.types';
+import type { Database } from '@shared/types/database.types';
 
 export type Venue = Database['public']['Tables']['venues']['Row'];
 
@@ -22,8 +22,3 @@ export const VenueSchema = z.object({
 });
 
 export type VenueForm = z.infer<typeof VenueSchema>;
-
-export const SPORT_LABEL: Record<Sport, string> = {
-  box_cricket: 'Box Cricket',
-  badminton: 'Badminton',
-};

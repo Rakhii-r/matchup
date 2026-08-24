@@ -13,6 +13,7 @@
     "lint": "eslint . --ext .ts,.tsx",
     "format": "prettier --write \"**/*.{ts,tsx,js,json,md}\"",
     "typecheck": "tsc --noEmit",
+    "test:e2e": "%USERPROFILE%\\.maestro\\bin\\maestro.bat test .maestro/config.yaml",
     "db:types": "supabase gen types typescript --local > src/shared/types/database.types.ts"
   },
   "dependencies": {

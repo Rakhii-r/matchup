@@ -8,7 +8,7 @@ import { ExpoConfig, ConfigContext } from 'expo/config';
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
   name: 'SIXFOUR 24',
-  slug: 'sixfour24',
+  slug: 'matchup',
   scheme: 'sixfour24',
   version: '0.1.0',
   // EAS Update. `eas update:configure` could not write these because this is a

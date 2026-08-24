@@ -14,6 +14,12 @@ const TOSS_ERRORS: [token: string, code: AppErrorCode, message: string][] = [
   ['DECISION_ALREADY_MADE', 'conflict', 'The choice has already been made.'],
   ['NOT_TOSS_WINNER', 'forbidden', 'Only the captain who won the toss can choose.'],
   ['INVALID_DECISION', 'validation', 'Pick bat or bowl.'],
+  ['TOSS_NOT_FOUND', 'not_found', 'The coin has not been flipped yet.'],
+  [
+    'TOSS_ALREADY_DECIDED',
+    'conflict',
+    'Bat or bowl has already been chosen, so the toss cannot be re-flipped.',
+  ],
 ];
 
 function tossError(error: unknown): AppError {
@@ -42,6 +48,20 @@ export const tossRepository = {
       in_match_id: matchId,
       in_overs: overs,
     });
+    if (error) throw tossError(error);
+  },
+
+  /**
+   * Re-roll the toss. Separate from `perform`, which is deliberately idempotent
+   * and therefore physically cannot re-roll — wiring a "flip again" button to it
+   * would land on the same face every time.
+   *
+   * Server-side this is captain-only and refuses once bat or bowl has been
+   * chosen, and it notifies BOTH captains: the other side was told who won by
+   * the original toss and must not be left holding a stale result.
+   */
+  async redo(matchId: string): Promise<void> {
+    const { error } = await supabase.rpc('redo_toss', { in_match_id: matchId });
     if (error) throw tossError(error);
   },
 

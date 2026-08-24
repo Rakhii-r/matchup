@@ -11,6 +11,10 @@ interface SubmitInput {
   fullName: string;
   areaName: string;
   sportPref: Sport[];
+  avatarBase64?: string | null;
+  removeAvatar?: boolean;
+  homeLat?: number | null;
+  homeLng?: number | null;
 }
 
 interface UseUpdateProfile {
@@ -43,11 +47,17 @@ export function useUpdateProfile(): UseUpdateProfile {
 
       setLoading(true);
       try {
+        let avatarUrl = undefined as string | null | undefined;
+        if (input.removeAvatar) { await profileRepository.removeAvatar(userId); avatarUrl = null; }
+        else if (input.avatarBase64) avatarUrl = await profileRepository.uploadAvatar(userId, input.avatarBase64);
         const profile = await profileRepository.update({
           userId,
           fullName: parsed.data.fullName,
           areaName: parsed.data.areaName,
           sportPref: parsed.data.sportPref,
+          avatarUrl,
+          homeLat: input.homeLat,
+          homeLng: input.homeLng,
         });
         setProfile(profile);
         analytics.capture('profile_created');

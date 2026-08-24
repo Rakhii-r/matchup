@@ -1,11 +1,14 @@
+import { useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
+import { supabase } from '@core/api/supabaseClient';
 import { useAuthStore } from '@core/auth/authStore';
 import { AppError } from '@core/errors/AppError';
 import type { Coords } from '@core/location/location';
 import { analytics } from '@core/observability/analytics';
 import { matchRepository } from '@features/matches/data/matchRepository';
-import { buildScheduledAt } from '@features/matches/domain/matchSchema';
+import type { CreateOpenMatchInput } from '@features/matches/data/matchRepository';
+import { buildEndAt, buildScheduledAt } from '@features/matches/domain/matchSchema';
 import type { CreateMatchForm, Match } from '@features/matches/domain/matchSchema';
 import type { PlayerStatus, Sport } from '@shared/types/database.types';
 import { venueRepository } from '@features/venues/data/venueRepository';
@@ -48,6 +51,50 @@ export function useMatchSides(matchId: string) {
   });
 }
 
+/**
+ * Keep one match's roster and seat count live while its screen is open.
+ *
+ * `match_players` is the only table in the `supabase_realtime` publication, and
+ * it is the one that moves: a join inserts a row there, and the
+ * `sync_filled_slots` trigger derives `matches.filled_slots` from it. So a
+ * change event on this match is the signal to refetch both. Realtime applies
+ * the table's RLS, so a subscriber is only ever told about rows it may read.
+ *
+ * The channel name is per match AND per user: two screens in the same app
+ * session must not collide on one topic, and the channel has to be torn down on
+ * unmount or the subscription leaks for the life of the app.
+ */
+export function useMatchPlayersRealtime(matchId: string): void {
+  const qc = useQueryClient();
+  const userId = useAuthStore((s) => s.session?.user.id);
+
+  useEffect(() => {
+    if (matchId.length === 0 || !userId) return;
+
+    const channel = supabase
+      .channel(`match-roster:${matchId}:${userId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'match_players',
+          filter: `match_id=eq.${matchId}`,
+        },
+        () => {
+          void qc.invalidateQueries({ queryKey: matchKey(matchId) });
+          void qc.invalidateQueries({ queryKey: playersKey(matchId) });
+          void qc.invalidateQueries({ queryKey: membershipKey(matchId, userId) });
+        },
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [matchId, userId, qc]);
+}
+
 export function useMyMembership(matchId: string) {
   const userId = useAuthStore((s) => s.session?.user.id);
   return useQuery({
@@ -80,6 +127,16 @@ export function useJoinedMatches() {
   return useQuery({
     queryKey: ['matches', 'joined', userId ?? 'anon'] as const,
     queryFn: () => matchRepository.listJoined(userId as string),
+    enabled: Boolean(userId),
+  });
+}
+
+/** Complete list of all matches created or joined by the user across all statuses. */
+export function useAllMyBookedMatches() {
+  const userId = useAuthStore((s) => s.session?.user.id);
+  return useQuery({
+    queryKey: ['matches', 'booked_all', userId ?? 'anon'] as const,
+    queryFn: () => matchRepository.listAllBookedMatches(userId as string),
     enabled: Boolean(userId),
   });
 }
@@ -132,11 +189,84 @@ export function useCreateMatch() {
         lat: venue.lat,
         lng: venue.lng,
         notes: form.notes ?? null,
+        // Both are undefined for every caller that predates the wizard, which
+        // leaves the game_type default and a null end_time — the old behaviour.
+        gameType: form.gameType ?? null,
+        endTime: buildEndAt(form.dayOffset, form.timeHHmm, form.endTimeHHmm)?.toISOString() ?? null,
       });
     },
     onSuccess: (match) => {
       analytics.capture('match_created', { sport: match.sport });
       void qc.invalidateQueries({ queryKey: matchKey(match.id) });
+    },
+  });
+}
+
+/**
+ * Post a Match (Open for all) — the second creation engine.
+ *
+ * Nothing here reads a team. `useCreateMatch` (direct insert) and
+ * `usePostOpenChallenge` (team challenge + radar) are both untouched; this is a
+ * third, parallel path, which is the whole point of the change: the two match
+ * types must not share a submit.
+ */
+export function useCreateOpenMatch() {
+  const qc = useQueryClient();
+  const userId = useAuthStore((s) => s.session?.user.id);
+
+  return useMutation({
+    mutationFn: async (input: CreateOpenMatchInput): Promise<Match> => {
+      if (!userId) throw new AppError('unauthorized', 'Please sign in again.');
+      return matchRepository.createOpen(input);
+    },
+    onSuccess: (match) => {
+      analytics.capture('match_created', { sport: match.sport, match_type: 'open' });
+      void qc.invalidateQueries({ queryKey: matchKey(match.id) });
+      void qc.invalidateQueries({ queryKey: ['matches', 'mine', userId ?? 'anon'] });
+      void qc.invalidateQueries({ queryKey: ['matches', 'nearby'] });
+    },
+  });
+}
+
+/**
+ * Take a seat in an open match, as an individual and with no approval step.
+ * The mutation variable is the match id so one hook can serve a list as well as
+ * a detail screen.
+ */
+export function useJoinOpenMatch() {
+  const invalidate = useInvalidateAfterJoin();
+  const userId = useAuthStore((s) => s.session?.user.id);
+
+  return useMutation({
+    mutationFn: async (matchId: string): Promise<string> => {
+      if (!userId) throw new AppError('unauthorized', 'Please sign in again.');
+      await matchRepository.joinOpen(matchId, 'browse');
+      return matchId;
+    },
+    onSuccess: (matchId) => {
+      analytics.capture('open_match_joined', { match_id: matchId });
+      invalidate(matchId);
+    },
+  });
+}
+
+/**
+ * Start a rematch / next match within the same slot.
+ */
+export function useRematch() {
+  const qc = useQueryClient();
+  const userId = useAuthStore((s) => s.session?.user.id);
+
+  return useMutation({
+    mutationFn: async (matchId: string): Promise<Match> => {
+      if (!userId) throw new AppError('unauthorized', 'Please sign in again.');
+      return matchRepository.createRematch(matchId);
+    },
+    onSuccess: (newMatch) => {
+      analytics.capture('match_created', { sport: newMatch.sport, is_rematch: true });
+      void qc.invalidateQueries({ queryKey: matchKey(newMatch.id) });
+      void qc.invalidateQueries({ queryKey: ['matches', 'mine', userId ?? 'anon'] });
+      void qc.invalidateQueries({ queryKey: ['matches', 'joined', userId ?? 'anon'] });
     },
   });
 }
@@ -154,6 +284,8 @@ function useInvalidateAfterJoin() {
     void qc.invalidateQueries({ queryKey: membershipKey(matchId, userId) });
     // The match just entered my joined list — the Matches screen must refetch.
     void qc.invalidateQueries({ queryKey: ['matches', 'joined', userId ?? 'anon'] });
+    // …and its nearby card now shows a different filled/total.
+    void qc.invalidateQueries({ queryKey: ['matches', 'nearby'] });
   };
 }
 
@@ -297,6 +429,17 @@ export function useMatchStatus(matchId: string) {
   });
 
   return { lock, complete, cancel };
+}
+
+export function useCancelMatch() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (matchId: string) => matchRepository.setStatus(matchId, 'cancelled'),
+    onSuccess: (_data, matchId) => {
+      analytics.capture('match_cancelled', { match_id: matchId });
+      void qc.invalidateQueries({ queryKey: ['matches'] });
+    },
+  });
 }
 
 export function useAttendanceActions(matchId: string) {

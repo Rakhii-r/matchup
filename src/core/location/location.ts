@@ -25,3 +25,28 @@ export async function getCurrentCoords(): Promise<Coords | null> {
     return null;
   }
 }
+
+/**
+ * Reverse-geocode coordinates to a human-readable area/locality name (e.g. "Baner, Pune").
+ */
+export async function getAreaNameFromCoords(coords: Coords): Promise<string | null> {
+  try {
+    const results = await Location.reverseGeocodeAsync({
+      latitude: coords.lat,
+      longitude: coords.lng,
+    });
+    if (results && results.length > 0 && results[0]) {
+      const first = results[0];
+      const area = first.district || first.subregion || first.name || first.city;
+      const city = first.city || first.region;
+      if (area && city && area !== city) {
+        return `${area}, ${city}`;
+      }
+      return area || city || null;
+    }
+    return null;
+  } catch (error) {
+    logger.warn('getAreaNameFromCoords failed', { error: String(error) });
+    return null;
+  }
+}

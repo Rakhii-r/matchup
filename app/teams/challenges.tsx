@@ -10,7 +10,8 @@ import {
   useMyChallenges,
   useRespondToChallenge,
 } from '@features/teams/presentation/useChallenges';
-import { colors, radius, spacing } from '@shared/theme';
+import { radius, spacing, type AppColors } from '@shared/theme';
+import { useTheme } from '@shared/theme/ThemeContext';
 import { AppText } from '@shared/ui/AppText';
 import { Button } from '@shared/ui/Button';
 import { Screen } from '@shared/ui/Screen';
@@ -26,6 +27,8 @@ function formatWhen(iso: string): string {
 }
 
 export default function ChallengesScreen(): React.ReactNode {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const router = useRouter();
   const challenges = useMyChallenges();
   const respond = useRespondToChallenge();
@@ -115,7 +118,13 @@ export default function ChallengesScreen(): React.ReactNode {
   };
 
   const renderRow = (c: ChallengeListItem): React.ReactNode => {
-    const opponent = c.direction === 'incoming' ? c.from_team_name : c.to_team_name;
+    const isOpenChallenge = c.status === 'open';
+    const opponent =
+      c.direction === 'incoming'
+        ? c.from_team_name
+        : isOpenChallenge
+          ? 'Radar Opponent Search'
+          : c.to_team_name;
     const busy = busyId === c.id;
     return (
       <View key={c.id} style={styles.row}>
@@ -140,40 +149,74 @@ export default function ChallengesScreen(): React.ReactNode {
           </AppText>
         ) : null}
 
-        {c.i_can_respond ? (
-          <View style={styles.actions}>
-            <Button label="Accept" disabled={busy} onPress={() => onAccept(c)} />
-            <Button
-              label="Decline"
-              variant="secondary"
-              disabled={busy}
-              onPress={() => onDecline(c)}
-            />
-          </View>
-        ) : null}
-
-        {c.i_can_cancel ? (
+        {isOpenChallenge && c.direction === 'outgoing' ? (
           <View style={styles.actions}>
             <Button
-              label="Withdraw"
-              variant="secondary"
-              disabled={busy}
-              onPress={() => onCancel(c)}
-            />
-          </View>
-        ) : null}
-
-        {c.status === 'accepted' && c.match_id ? (
-          <View style={styles.actions}>
-            <Button
-              label="Open match"
-              variant="secondary"
+              label="⚡ View Live Radar"
               onPress={() =>
-                router.push({ pathname: '/match/[id]', params: { id: c.match_id as string } })
+                router.push({
+                  pathname: '/match/create/searching',
+                  params: { challengeId: c.id },
+                })
               }
             />
+            <Button
+              label="View Offers"
+              variant="secondary"
+              onPress={() =>
+                router.push({
+                  pathname: '/teams/offers',
+                  params: { challengeId: c.id },
+                })
+              }
+            />
+            {c.i_can_cancel ? (
+              <Button
+                label="Withdraw"
+                variant="danger"
+                disabled={busy}
+                onPress={() => onCancel(c)}
+              />
+            ) : null}
           </View>
-        ) : null}
+        ) : (
+          <>
+            {c.i_can_respond ? (
+              <View style={styles.actions}>
+                <Button label="Accept" disabled={busy} onPress={() => onAccept(c)} />
+                <Button
+                  label="Decline"
+                  variant="secondary"
+                  disabled={busy}
+                  onPress={() => onDecline(c)}
+                />
+              </View>
+            ) : null}
+
+            {c.i_can_cancel ? (
+              <View style={styles.actions}>
+                <Button
+                  label="Withdraw"
+                  variant="secondary"
+                  disabled={busy}
+                  onPress={() => onCancel(c)}
+                />
+              </View>
+            ) : null}
+
+            {c.status === 'accepted' && c.match_id ? (
+              <View style={styles.actions}>
+                <Button
+                  label="Open match"
+                  variant="secondary"
+                  onPress={() =>
+                    router.push({ pathname: '/match/[id]', params: { id: c.match_id as string } })
+                  }
+                />
+              </View>
+            ) : null}
+          </>
+        )}
       </View>
     );
   };
@@ -225,18 +268,19 @@ export default function ChallengesScreen(): React.ReactNode {
   );
 }
 
-const styles = StyleSheet.create({
-  heading: { marginTop: spacing.lg, marginBottom: spacing.sm, letterSpacing: 0.5 },
-  notice: { gap: spacing.sm, paddingVertical: spacing.lg, alignItems: 'flex-start' },
-  row: {
-    gap: 2,
-    padding: spacing.md,
-    marginBottom: spacing.sm,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
-  },
-  rowHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  actions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm },
-});
+const makeStyles = (colors: AppColors) =>
+  StyleSheet.create({
+    heading: { marginTop: spacing.lg, marginBottom: spacing.sm, letterSpacing: 0.5 },
+    notice: { gap: spacing.sm, paddingVertical: spacing.lg, alignItems: 'flex-start' },
+    row: {
+      gap: 2,
+      padding: spacing.md,
+      marginBottom: spacing.sm,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+    },
+    rowHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+    actions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm },
+  });

@@ -27,5 +27,6 @@ export const TeamInviteCodeSchema = z.object({
 
 export const TEAM_ROLE_LABEL: Record<TeamRole, string> = {
   owner: 'Owner',
+  vice_captain: 'Vice captain',
   member: 'Member',
 };

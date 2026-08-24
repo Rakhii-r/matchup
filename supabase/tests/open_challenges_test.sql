@@ -269,26 +269,97 @@ begin
   if exists (select 1 from public.challenge_candidates where challenge_id = v_row.id) then
     raise exception 'FAIL 7b: candidates found inside a 1km radius';
   end if;
+  insert into t_ids values ('challenge_D', v_row.id);
   raise notice 'PASS 7: zero candidates degrades to an empty offer list';
 end $$;
 
 -- ---------------------------------------------------------------------------
--- 8. One live open challenge per team.
+-- 8. team_schedule_conflict — overlap, not "any open challenge exists".
+--
+-- Team D has one open challenge from test 7, at now()+3 days, no end_time
+-- (assumed to run 3 hours per team_schedule_conflict's fallback).
+-- ---------------------------------------------------------------------------
+do $$
+declare v_row public.team_challenges%rowtype;
+begin
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', (select id from t_ids where label = 'owner_D'))::text, true);
+
+  -- 8a. A non-overlapping date must be allowed — this is exactly the bug
+  -- being fixed: the old rule blocked ANY second post regardless of when.
+  v_row := public.post_open_challenge(
+    (select id from t_ids where label = 'team_D'),
+    'Non-overlapping fixture',
+    (select id from t_ids where label = 'venue'),
+    now() + interval '4 days', 20, null, 1000);
+  if v_row.status <> 'open' then
+    raise exception 'FAIL 8a: non-overlapping post was not allowed';
+  end if;
+  raise notice 'PASS 8a: a team may hold two open challenges on different dates';
+
+  -- 8b. A time that overlaps the test-7 challenge's assumed 3-hour window
+  -- must be blocked.
+  begin
+    perform public.post_open_challenge(
+      (select id from t_ids where label = 'team_D'),
+      'Overlapping fixture',
+      (select id from t_ids where label = 'venue'),
+      now() + interval '3 days' + interval '1 hour', 20, null, 1000);
+    raise exception 'FAIL 8b: an overlapping post was allowed';
+  exception when sqlstate '23505' then
+    if sqlerrm not like 'TEAM_SCHEDULE_CONFLICT|%' then
+      raise exception 'FAIL 8b: wrong conflict raised: %', sqlerrm;
+    end if;
+    raise notice 'PASS 8b: TEAM_SCHEDULE_CONFLICT enforced for an overlapping time';
+  end;
+
+  -- 8c. Withdrawing the conflicting challenge frees the slot — matches
+  -- searching.tsx's "Change radius" flow, which withdraws before re-posting.
+  perform public.cancel_challenge(
+    (select id from t_ids where label = 'challenge_D')
+  );
+  v_row := public.post_open_challenge(
+    (select id from t_ids where label = 'team_D'),
+    'Re-posted after withdraw',
+    (select id from t_ids where label = 'venue'),
+    now() + interval '3 days' + interval '1 hour', 20, null, 1000);
+  if v_row.status <> 'open' then
+    raise exception 'FAIL 8c: post after withdrawing the conflict was not allowed';
+  end if;
+  raise notice 'PASS 8c: withdrawing the conflicting challenge unblocks the slot';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 8d. The same check also fires against a real `matches` row, not only
+-- `team_challenges`. Team A has a confirmed match from test 5, at
+-- now()+2 days, status 'open'. Posting a new challenge for team A at an
+-- overlapping time must be blocked; a clear day must not be.
 -- ---------------------------------------------------------------------------
 do $$
 begin
   perform set_config('request.jwt.claims',
-    json_build_object('sub', (select id from t_ids where label = 'owner_D'))::text, true);
+    json_build_object('sub', (select id from t_ids where label = 'owner_A'))::text, true);
+
   begin
     perform public.post_open_challenge(
-      (select id from t_ids where label = 'team_D'),
-      'Second fixture',
+      (select id from t_ids where label = 'team_A'),
+      'Clashes with the confirmed match',
       (select id from t_ids where label = 'venue'),
-      now() + interval '4 days', 20, null, 1000);
-    raise exception 'FAIL 8: a team posted two live open challenges';
+      now() + interval '2 days' + interval '1 hour', 20, null, 1000);
+    raise exception 'FAIL 8d: a post overlapping a confirmed match was allowed';
   exception when sqlstate '23505' then
-    raise notice 'PASS 8: OPEN_CHALLENGE_ALREADY_LIVE enforced';
+    if sqlerrm not like 'TEAM_SCHEDULE_CONFLICT|%' then
+      raise exception 'FAIL 8d: wrong conflict raised: %', sqlerrm;
+    end if;
+    raise notice 'PASS 8d: TEAM_SCHEDULE_CONFLICT enforced against a real match';
   end;
+
+  perform public.post_open_challenge(
+    (select id from t_ids where label = 'team_A'),
+    'A clear day is fine',
+    (select id from t_ids where label = 'venue'),
+    now() + interval '9 days', 20, null, 1000);
+  raise notice 'PASS 8e: a non-overlapping day is unaffected by the confirmed match';
 end $$;
 
 -- ---------------------------------------------------------------------------

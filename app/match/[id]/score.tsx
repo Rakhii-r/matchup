@@ -15,9 +15,10 @@ import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, View } fro
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 
 import { AppError } from '@core/errors/AppError';
-import { useMatchPlayers } from '@features/matches/presentation/useMatches';
+import { useMatch, useMatchPlayers } from '@features/matches/presentation/useMatches';
 import {
   useEndInnings,
+  useFinishMatch,
   useLiveState,
   useRecordDelivery,
   useStartInnings,
@@ -32,7 +33,8 @@ import {
   runRate,
 } from '@features/scoring/domain/scoringSchema';
 import type { ExtraType, WicketType } from '@shared/types/database.types';
-import { colors, radius, spacing } from '@shared/theme';
+import { radius, spacing, type AppColors } from '@shared/theme';
+import { useTheme } from '@shared/theme/ThemeContext';
 import { AppText } from '@shared/ui/AppText';
 import { Button } from '@shared/ui/Button';
 import { Screen } from '@shared/ui/Screen';
@@ -42,6 +44,8 @@ const EXTRAS: ExtraType[] = ['wide', 'no_ball', 'bye', 'leg_bye'];
 const WICKETS: WicketType[] = ['bowled', 'caught', 'lbw', 'run_out', 'stumped', 'hit_wicket'];
 
 export default function ScoreScreen(): React.ReactNode {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const { id } = useLocalSearchParams<{ id: string }>();
   const matchId = id ?? '';
   const router = useRouter();
@@ -57,17 +61,23 @@ export default function ScoreScreen(): React.ReactNode {
 
   const thisOver = useThisOver(inningsId, isScorer);
   const players = useMatchPlayers(matchId);
+  // Read to tell "second innings closed" from "match actually finished": the
+  // innings status alone cannot distinguish them, and only one of the two needs
+  // the recovery card below.
+  const match = useMatch(matchId);
 
   const startInnings = useStartInnings(matchId);
   const record = useRecordDelivery(matchId, inningsId);
   const undo = useUndoLastDelivery(matchId, inningsId);
   const endInnings = useEndInnings(matchId, inningsId);
+  const finishMatch = useFinishMatch(matchId);
 
   const [striker, setStriker] = useState<string | null>(null);
   const [nonStriker, setNonStriker] = useState<string | null>(null);
   const [bowler, setBowler] = useState<string | null>(null);
   const [extra, setExtra] = useState<ExtraType | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [ending, setEnding] = useState(false);
 
   // Only confirmed players can be on the field. Split by side so the striker
   // picker never offers a fielder.
@@ -124,6 +134,77 @@ export default function ScoreScreen(): React.ReactNode {
       ...WICKETS.map((w) => ({ text: WICKET_LABEL[w], onPress: () => void send(0, w) })),
       { text: 'Cancel', style: 'cancel' as const },
     ]);
+  }
+
+  /**
+   * Finish the match — the second half of the end-of-match sequence, on its own
+   * so the recovery card below can retry it without closing an innings twice.
+   *
+   * `finish_match` is what computes the winner and writes
+   * `matches.status = 'completed'` and `result_text`. `end_innings` never
+   * touches the match, so skipping this leaves the fixture forever in progress.
+   */
+  async function finish(): Promise<void> {
+    if (ending) return;
+    setError(null);
+    setEnding(true);
+    try {
+      // null MOTM: there is no Player of the Match picker in the app yet, and
+      // finish_match coalesces null onto the existing column rather than
+      // clearing it. Inventing a name here would be worse than leaving it unset.
+      await finishMatch.mutateAsync(null);
+    } catch (e) {
+      // Mapped in scoringRepository (NOT_THE_SCORER, SECOND_INNINGS_MISSING…).
+      // Surfaced as-is, never re-mapped and never swallowed.
+      setError(e instanceof AppError ? e.message : 'Could not finish the match.');
+      setEnding(false);
+      return;
+    }
+    // `ending` is deliberately NOT cleared: this replaces the route, and
+    // clearing it would re-enable the button for the frame before the
+    // transition. Same reasoning as the `submitting` flag in app/teams/create.tsx.
+    router.replace(`/match/${matchId}/result`);
+  }
+
+  /**
+   * End the SECOND innings. Two sequential writes, not one:
+   *
+   *   1. end_innings  — closes the innings row. That is all it does.
+   *   2. finish_match — computes the winner and completes the match.
+   *
+   * `endInnings.isPending` covers only the first, and flips back to false the
+   * instant the innings closes while finish_match is still in flight. Binding
+   * the button to it would leave it live mid-sequence — the double-submit that
+   * created two identical teams in app/teams/create.tsx. The single `ending`
+   * flag spans BOTH calls instead.
+   *
+   * If step 2 fails after step 1 succeeded the innings is closed and the match
+   * is not. That is said out loud, the scorer stays on this screen, and the
+   * "Finish match" card below retries step 2 alone.
+   */
+  async function endSecondInnings(): Promise<void> {
+    if (ending) return;
+    setError(null);
+    setEnding(true);
+    try {
+      await endInnings.mutateAsync();
+    } catch (e) {
+      setError(e instanceof AppError ? e.message : 'Could not end the innings.');
+      setEnding(false);
+      return;
+    }
+    try {
+      await finishMatch.mutateAsync(null);
+    } catch (e) {
+      setError(
+        e instanceof AppError
+          ? `${e.message} The innings is closed but the match is not finished — tap Finish match to try again.`
+          : 'The innings was closed but the match could not be finished. Tap Finish match to try again.',
+      );
+      setEnding(false);
+      return;
+    }
+    router.replace(`/match/${matchId}/result`);
   }
 
   if (live.isLoading) {
@@ -333,7 +414,10 @@ export default function ScoreScreen(): React.ReactNode {
             <Button
               label={state.innings_number === 1 ? 'End innings' : 'End match'}
               variant="secondary"
-              loading={endInnings.isPending}
+              // First innings: `endInnings.isPending` is the whole write, so
+              // `ending` stays false and this reduces to the old behaviour.
+              // Second innings: `ending` spans end_innings AND finish_match.
+              loading={ending || endInnings.isPending}
               onPress={() =>
                 Alert.alert(
                   state.innings_number === 1 ? 'End this innings?' : 'End the match?',
@@ -342,10 +426,21 @@ export default function ScoreScreen(): React.ReactNode {
                     { text: 'Keep scoring', style: 'cancel' },
                     {
                       text: 'End',
-                      onPress: () =>
-                        endInnings.mutate(undefined, {
-                          onSuccess: () => router.push(`/match/${matchId}/scorecard`),
-                        }),
+                      onPress: () => {
+                        if (state.innings_number === 1) {
+                          // Unchanged: close the innings, then the "Innings
+                          // over → Start second innings" card takes over.
+                          endInnings.mutate(undefined, {
+                            onSuccess: () => router.push(`/match/${matchId}/scorecard`),
+                            onError: (e: unknown) =>
+                              setError(
+                                e instanceof AppError ? e.message : 'Could not end the innings.',
+                              ),
+                          });
+                          return;
+                        }
+                        void endSecondInnings();
+                      },
                     },
                   ],
                 )
@@ -367,6 +462,46 @@ export default function ScoreScreen(): React.ReactNode {
               label="Start second innings"
               loading={startInnings.isPending}
               onPress={() => startInnings.mutate()}
+            />
+          </View>
+        </View>
+      ) : null}
+
+      {/*
+        Second innings closed, match not finished. `end_innings` only closes the
+        innings row, so this is the state left behind when finish_match failed —
+        or when the app died between the two calls. It is recoverable: retrying
+        finish_match alone needs nothing but the second innings to exist.
+      */}
+      {isScorer &&
+      state.status === 'completed' &&
+      state.innings_number === 2 &&
+      match.isSuccess &&
+      match.data?.status !== 'completed' ? (
+        <View style={styles.card}>
+          <AppText variant="label">Innings closed — no result yet</AppText>
+          <AppText variant="caption" muted>
+            {state.batting_team} finished on {state.runs}/{state.wickets}. The match is not
+            complete until the result is recorded — that is what works out who won.
+          </AppText>
+          <View style={{ marginTop: spacing.md }}>
+            <Button label="Finish match" loading={ending} onPress={() => void finish()} />
+          </View>
+        </View>
+      ) : null}
+
+      {match.data?.status === 'completed' ? (
+        <View style={styles.card}>
+          <AppText variant="label">Match complete</AppText>
+          {match.data.result_text ? (
+            <AppText variant="caption" muted>
+              {match.data.result_text}
+            </AppText>
+          ) : null}
+          <View style={{ marginTop: spacing.sm }}>
+            <Button
+              label="View result"
+              onPress={() => router.replace(`/match/${matchId}/result`)}
             />
           </View>
         </View>
@@ -396,6 +531,9 @@ interface PlayerRowProps {
 }
 
 function PlayerRow({ items, selected, onSelect }: PlayerRowProps): React.ReactNode {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
+
   if (items.length === 0) {
     return (
       <AppText variant="caption" muted>
@@ -424,44 +562,45 @@ function PlayerRow({ items, selected, onSelect }: PlayerRowProps): React.ReactNo
   );
 }
 
-const styles = StyleSheet.create({
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: spacing.xxl },
-  board: {
-    gap: spacing.xs,
-    padding: spacing.lg,
-    borderRadius: radius.md,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    marginBottom: spacing.md,
-  },
-  score: { fontSize: 40, fontWeight: '800', color: colors.text },
-  card: {
-    gap: spacing.sm,
-    padding: spacing.md,
-    borderRadius: radius.md,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    marginBottom: spacing.md,
-  },
-  row: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, alignItems: 'center' },
-  chip: {
-    minWidth: 32,
-    paddingHorizontal: spacing.xs,
-    paddingVertical: 4,
-    borderRadius: radius.sm,
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-  },
-  chipWicket: { backgroundColor: colors.danger },
-  pill: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    borderRadius: radius.sm,
-    backgroundColor: colors.background,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  pillOn: { backgroundColor: colors.primary, borderColor: colors.primary },
-});
+const makeStyles = (colors: AppColors) =>
+  StyleSheet.create({
+    center: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: spacing.xxl },
+    board: {
+      gap: spacing.xs,
+      padding: spacing.lg,
+      borderRadius: radius.md,
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.border,
+      marginBottom: spacing.md,
+    },
+    score: { fontSize: 40, fontWeight: '800', color: colors.text },
+    card: {
+      gap: spacing.sm,
+      padding: spacing.md,
+      borderRadius: radius.md,
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.border,
+      marginBottom: spacing.md,
+    },
+    row: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, alignItems: 'center' },
+    chip: {
+      minWidth: 32,
+      paddingHorizontal: spacing.xs,
+      paddingVertical: 4,
+      borderRadius: radius.sm,
+      backgroundColor: colors.primary,
+      alignItems: 'center',
+    },
+    chipWicket: { backgroundColor: colors.danger },
+    pill: {
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.xs,
+      borderRadius: radius.sm,
+      backgroundColor: colors.background,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    pillOn: { backgroundColor: colors.primary, borderColor: colors.primary },
+  });

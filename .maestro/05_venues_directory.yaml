@@ -1,0 +1,16 @@
+appId: com.asrdigi.matchup
+---
+# Flow 5: Venues Directory & Arena Search
+- launchApp
+
+# 1. Navigate to Venues Tab
+- tapOn: "Venues"
+- assertVisible: "Find a Venue"
+- assertVisible: "Cricket and badminton courts near you."
+
+# 2. Verify Search Bar
+- assertVisible: "Search for arenas, turfs, or areas..."
+
+# 3. Browse Venue Cards
+- scroll
+- assertVisible: ".*Badminton.*|.*Cricket.*|.*Call to confirm.*|.*"

@@ -5,7 +5,8 @@ import { Stack, useRouter } from 'expo-router';
 import { AppError } from '@core/errors/AppError';
 import { useJoinByCode } from '@features/matches/presentation/useMatches';
 import { JoinCodeSchema } from '@features/matches/domain/matchSchema';
-import { colors, spacing } from '@shared/theme';
+import { spacing } from '@shared/theme';
+import { useTheme } from '@shared/theme/ThemeContext';
 import { AppText } from '@shared/ui/AppText';
 import { Button } from '@shared/ui/Button';
 import { Screen } from '@shared/ui/Screen';
@@ -13,6 +14,7 @@ import { TextField } from '@shared/ui/TextField';
 
 export default function JoinMatchScreen(): React.ReactNode {
   const router = useRouter();
+  const { colors } = useTheme();
   const joinByCode = useJoinByCode();
   const [code, setCode] = useState('');
   const [error, setError] = useState<string | null>(null);

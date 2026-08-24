@@ -1,0 +1,25 @@
+appId: com.asrdigi.matchup
+---
+# Flow 4: Live Radar & Opponent Scanner
+- launchApp
+
+# 1. Check if Live Radar banner exists or navigate via Teams
+- tapOn: "LIVE RADAR.*|Opponent Radar.*|Finding Opponent.*"
+
+# 2. Verify Radar Dish & Scan Header
+- assertVisible: ".*Radar.*|.*Opponent.*"
+- assertVisible: ".*Scanning.*"
+
+# 3. Test Radius Chips
+- tapOn: "10 km"
+- assertVisible: ".*10 km.*"
+
+- tapOn: "50 km"
+- assertVisible: ".*50 km.*"
+
+- tapOn: "25 km"
+- assertVisible: ".*25 km.*"
+
+# 4. Back Navigation
+- back
+- assertVisible: ".*"

@@ -47,8 +47,7 @@ function ThemedStatusBar(): React.ReactElement {
 
 function RootLayout(): React.ReactNode {
   const authStatus = useAuthStore((s) => s.status);
-  // splashVisible: true until auth resolves (loading → anything else)
-  const [splashVisible, setSplashVisible] = useState(true);
+  const splashVisible = authStatus === 'loading';
   const [splashHidden, setSplashHidden] = useState(false);
   const nativeSplashHidden = useRef(false);
 
@@ -59,13 +58,6 @@ function RootLayout(): React.ReactNode {
       void SplashScreen.hideAsync();
     }
   }, []);
-
-  // When auth resolves, start AppSplash fade-out sequence.
-  useEffect(() => {
-    if (authStatus !== 'loading') {
-      setSplashVisible(false);
-    }
-  }, [authStatus]);
 
   const onSplashHidden = useCallback(() => {
     setSplashHidden(true);
@@ -79,8 +71,6 @@ function RootLayout(): React.ReactNode {
         <Stack.Screen name="(auth)" />
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="(admin)" />
-        {/* headerShown so the screen's own Stack.Screen title renders. */}
-        <Stack.Screen name="matches" options={{ headerShown: true }} />
         {/* teams has its own _layout that styles the header for the whole group. */}
         <Stack.Screen name="teams" />
         <Stack.Screen name="profile" options={{ presentation: 'modal' }} />

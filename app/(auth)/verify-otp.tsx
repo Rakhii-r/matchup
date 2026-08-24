@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Pressable,
@@ -15,7 +15,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import Svg, { Circle, Path } from 'react-native-svg';
 
 import { useOtp } from '@features/auth/presentation/useOtp';
-import { spacing } from '@shared/theme';
+import { spacing, type AppColors } from '@shared/theme';
 import { useTheme } from '@shared/theme/ThemeContext';
 import { AppLogo } from '@shared/ui/AppLogo';
 import { AppText } from '@shared/ui/AppText';
@@ -28,17 +28,18 @@ const RESEND_SECONDS = 60;
 const STADIUM_BG = require('../../assets/images/login-screen.png') as number;
 
 export default function VerifyOtpScreen(): React.ReactNode {
-  const { isDark } = useTheme();
+  const { colors, isDark } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const params = useLocalSearchParams<{ phone?: string }>();
   const phone = typeof params.phone === 'string' ? params.phone : '';
   const router = useRouter();
   const { loading, error, verifyOtp, requestOtp } = useOtp();
   const [code, setCode] = useState('');
   const [countdown, setCountdown] = useState(RESEND_SECONDS);
-  const [canResend, setCanResend] = useState(false);
+  const canResend = countdown <= 0;
 
   useEffect(() => {
-    if (countdown <= 0) { setCanResend(true); return; }
+    if (countdown <= 0) return;
     const t = setTimeout(() => setCountdown((c) => c - 1), 1000);
     return () => clearTimeout(t);
   }, [countdown]);
@@ -57,7 +58,6 @@ export default function VerifyOtpScreen(): React.ReactNode {
     void requestOtp(phone);
     setCode('');
     setCountdown(RESEND_SECONDS);
-    setCanResend(false);
   }, [phone, canResend, requestOtp]);
 
   const padded = phone.replace(/(\+91)(\d{5})(\d{5})/, '$1 $2 $3');
@@ -101,7 +101,7 @@ export default function VerifyOtpScreen(): React.ReactNode {
             <AppText
               variant="title"
               center
-              color="#FFFFFF"
+              color={colors.onPhoto}
               style={styles.title}
             >
               Verify OTP
@@ -168,7 +168,7 @@ export default function VerifyOtpScreen(): React.ReactNode {
                 end={{ x: 1, y: 0 }}
                 style={styles.ctaGradient}
               >
-                <AppText variant="label" color="#FFFFFF" style={{ fontSize: 17 }}>
+                <AppText variant="label" color={colors.onPhoto} style={{ fontSize: 17 }}>
                   {loading ? 'Verifying…' : 'Verify & Continue  ›'}
                 </AppText>
                 <View style={styles.ballWrap}>
@@ -193,7 +193,8 @@ export default function VerifyOtpScreen(): React.ReactNode {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: AppColors) =>
+  StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#050C19' },
   bg: { flex: 1, minHeight: SCREEN_H },
   kav: { flex: 1 },

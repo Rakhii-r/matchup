@@ -36,7 +36,7 @@ const USER_MESSAGE: Record<AppErrorCode, string> = {
   unauthorized: 'Please sign in to continue.',
   forbidden: "You don't have permission to do that.",
   not_found: "We couldn't find what you were looking for.",
-  conflict: 'That action conflicts with the current state. Please refresh and retry.',
+  conflict: 'This time slot or team already has a match scheduled. Please choose a different time or date.',
   validation: 'Some details are invalid. Please review and try again.',
   rate_limited: 'Too many attempts. Please wait a moment and try again.',
   unknown: 'Something went wrong. Please try again.',
@@ -59,6 +59,14 @@ export function toAppError(error: unknown): AppError {
     return new AppError(
       'unknown',
       'The match database update is not installed yet. Please apply the latest Supabase migrations.',
+      error,
+    );
+  }
+
+  if (raw.includes('team_schedule_conflict') || raw.includes('player_schedule_conflict') || raw.includes('opponent_schedule_conflict')) {
+    return new AppError(
+      'conflict',
+      'This time slot already has an active match or open challenge scheduled. Please pick a different time or date.',
       error,
     );
   }

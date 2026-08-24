@@ -4,7 +4,11 @@ import type { AppErrorCode } from '@core/errors/AppError';
 import { logger } from '@core/logging/logger';
 import { generateShareCode } from '@features/matches/domain/matchSchema';
 import type { Match, MatchPlayer } from '@features/matches/domain/matchSchema';
-import type { JoinedVia, PlayerStatus, Sport } from '@shared/types/database.types';
+import type { GameType, JoinedVia, PlayerStatus, Sport } from '@shared/types/database.types';
+import {
+  formatConflictWindow,
+  parseScheduleConflict,
+} from '@shared/utils/scheduleConflict';
 
 /**
  * `join_match` signals every refusal with a stable token as the error message
@@ -25,6 +29,17 @@ const JOIN_ERRORS: [token: string, code: AppErrorCode, message: string][] = [
   ['NOT_INVITED', 'not_found', 'You are not on the sheet for this match.'],
   ['INVITE_ALREADY_ANSWERED', 'conflict', 'You have already answered this one.'],
   ['MATCH_ALREADY_STARTED', 'conflict', 'That match has already started.'],
+  // create_open_match / join_open_match. PLAYER_SCHEDULE_CONFLICT is handled
+  // separately below because it carries the clashing window in the message.
+  ['NOT_OPEN_MATCH', 'conflict', 'That match is not open for individual players.'],
+  ['INVALID_SPORT', 'validation', 'Pick a sport.'],
+  ['INVALID_GAME_TYPE', 'validation', 'Pick a game type.'],
+  ['INVALID_SLOTS', 'validation', 'Pick how many players the match needs.'],
+  ['INVALID_RADIUS', 'validation', 'Pick a search distance.'],
+  ['SCHEDULE_IN_PAST', 'validation', 'Pick a date and time in the future.'],
+  ['END_BEFORE_START', 'validation', 'The end time must be after the start time.'],
+  ['VENUE_NOT_FOUND', 'not_found', 'That venue is no longer available.'],
+  ['VENUE_SPORT_MISMATCH', 'validation', 'That venue does not host the selected sport.'],
 ];
 
 // A match can still be in progress after its scheduled start. Keep it in
@@ -43,6 +58,19 @@ function isDiscoverableMatch(match: Match, nowMs: number): boolean {
 
 function joinErrorToAppError(error: unknown): AppError {
   const raw = (error as { message?: string } | null)?.message ?? '';
+
+  // Requirement: a player is blocked only by an OVERLAPPING booking, never by
+  // merely having another match on another day — so the message names the one
+  // that actually clashes instead of saying "you already have a match".
+  const clash = parseScheduleConflict(raw, 'PLAYER_SCHEDULE_CONFLICT');
+  if (clash) {
+    return new AppError(
+      'conflict',
+      `You are already playing ${formatConflictWindow(clash.startIso, clash.endIso)}. Pick a time that does not overlap.`,
+      error,
+    );
+  }
+
   for (const [token, code, message] of JOIN_ERRORS) {
     // Some transports wrap the raise message in extra text, so match on contains
     // rather than equality. Tokens are distinct and none is a prefix of another.
@@ -63,6 +91,33 @@ export interface CreateMatchInput {
   lat: number;
   lng: number;
   notes?: string | null;
+  /**
+   * Both optional and both nullable: every caller that predates the create
+   * wizard passes neither, which leaves the `game_type` column default and a
+   * null `end_time`. They were being passed by useCreateMatch already and
+   * silently dropped here, which is why the column never moved.
+   */
+  gameType?: GameType | null;
+  endTime?: string | null;
+}
+
+/** Everything `create_open_match` needs. Deliberately has no team field. */
+export interface CreateOpenMatchInput {
+  matchName: string;
+  sport: Sport;
+  areaName: string;
+  /** ISO instant. Composed from the day chip and the start-time picker. */
+  scheduledAt: string;
+  /** ISO instant, or null when the organiser left the finish open. */
+  endTime: string | null;
+  /** Seats on the sheet — twice the players-per-side chip. */
+  totalSlots: number;
+  gameType: GameType;
+  /** Metres. The chips are kilometres and multiply by 1000. */
+  radiusM: number;
+  lat?: number | null;
+  lng?: number | null;
+  venueId?: string | null;
 }
 
 /**
@@ -71,7 +126,7 @@ export interface CreateMatchInput {
  * and null for an ordinary match, which has no sides.
  */
 export interface PlayerWithProfile extends MatchPlayer {
-  profile: { full_name: string; area_name: string | null } | null;
+  profile: { full_name: string; area_name: string | null; avatar_url: string | null } | null;
   team_name: string | null;
   side: 'a' | 'b' | null;
 }
@@ -120,6 +175,8 @@ export const matchRepository = {
           lng: input.lng,
           share_code: shareCode,
           notes: input.notes ?? null,
+          ...(input.gameType ? { game_type: input.gameType } : {}),
+          end_time: input.endTime ?? null,
         })
         .select('*')
         .single();
@@ -131,6 +188,70 @@ export const matchRepository = {
       throw toAppError(error);
     }
     throw new AppError('conflict', 'Could not generate a unique share code. Please try again.');
+  },
+
+  /**
+   * Post a Match (Open for all).
+   *
+   * A completely separate write from {@link create} and from
+   * `challengeRepository.postOpen`: no team is sent, no `team_challenges` row is
+   * made and no opponent is searched for. `create_open_match` also seats the
+   * caller as the host in the same transaction, so the match is never visible
+   * with an empty roster and `filled_slots` is 1 the instant it exists.
+   *
+   * Everything that can refuse it — a past time, a venue that does not host the
+   * sport, an overlapping booking of the caller's own — is checked inside the
+   * RPC under an advisory lock, because a client-side check can always be stale
+   * by the time the user taps Post.
+   */
+  async createOpen(input: CreateOpenMatchInput): Promise<Match> {
+    const { data, error } = await supabase.rpc('create_open_match', {
+      in_sport: input.sport,
+      in_match_name: input.matchName,
+      in_area_name: input.areaName,
+      in_scheduled_at: input.scheduledAt,
+      in_total_slots: input.totalSlots,
+      in_end_time: input.endTime ?? null,
+      in_game_type: input.gameType,
+      in_radius_m: input.radiusM,
+      in_lat: input.lat ?? null,
+      in_lng: input.lng ?? null,
+      in_venue_id: input.venueId ?? null,
+    });
+    if (error) throw joinErrorToAppError(error);
+    if (!data) throw new AppError('unknown', 'Could not post the match. Please try again.');
+    return data;
+  },
+
+  /**
+   * Take a seat in an open match as an individual.
+   *
+   * Distinct from {@link join}, which queues you as 'interested' and waits for
+   * the organiser. Here the seat is yours immediately ('confirmed'), which is
+   * what the "Open for all players to join" promise means. Idempotent: a second
+   * call returns the row you already have rather than failing.
+   */
+  async joinOpen(matchId: string, joinedVia: JoinedVia): Promise<MatchPlayer> {
+    const { data, error } = await supabase.rpc('join_open_match', {
+      in_match_id: matchId,
+      in_joined_via: joinedVia,
+    });
+    if (error) throw joinErrorToAppError(error);
+    if (!data) throw new AppError('unknown', 'Could not join that match. Please try again.');
+    return data;
+  },
+
+  /**
+   * Start a Rematch / Play Again within the same booked time slot.
+   * Copies confirmed players, sets status = 'locked' and scheduled_at = now().
+   */
+  async createRematch(matchId: string): Promise<Match> {
+    const { data, error } = await supabase.rpc('create_rematch', {
+      in_match_id: matchId,
+    });
+    if (error) throw toAppError(error);
+    if (!data) throw new AppError('unknown', 'Could not create rematch. Please try again.');
+    return data;
   },
 
   async getById(matchId: string): Promise<Match | null> {
@@ -195,6 +316,56 @@ export const matchRepository = {
       .map((row) => ({ match: row.match, myStatus: row.status }));
   },
 
+  /**
+   * Complete list of matches the user is associated with (created or joined),
+   * across all statuses (open, locked, completed, cancelled).
+   */
+  async listAllBookedMatches(userId: string): Promise<{
+    match: Match;
+    myRole: 'creator' | 'player';
+    myStatus: PlayerStatus | 'confirmed';
+  }[]> {
+    const { data: created, error: createdErr } = await supabase
+      .from('matches')
+      .select('*')
+      .eq('creator_id', userId)
+      .order('scheduled_at', { ascending: false });
+    if (createdErr) throw toAppError(createdErr);
+
+    const { data: joined, error: joinedErr } = await supabase
+      .from('match_players')
+      .select('status, match:matches(*)')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+    if (joinedErr) throw toAppError(joinedErr);
+
+    const matchMap = new Map<string, {
+      match: Match;
+      myRole: 'creator' | 'player';
+      myStatus: PlayerStatus | 'confirmed';
+    }>();
+
+    for (const m of created ?? []) {
+      matchMap.set(m.id, { match: m, myRole: 'creator', myStatus: 'confirmed' });
+    }
+
+    const joinedRows = (joined ?? []) as unknown as { status: PlayerStatus; match: Match | null }[];
+    for (const row of joinedRows) {
+      if (!row.match) continue;
+      if (!matchMap.has(row.match.id)) {
+        matchMap.set(row.match.id, {
+          match: row.match,
+          myRole: 'player',
+          myStatus: row.status,
+        });
+      }
+    }
+
+    return Array.from(matchMap.values()).sort(
+      (a, b) => new Date(b.match.scheduled_at).getTime() - new Date(a.match.scheduled_at).getTime(),
+    );
+  },
+
   async nearby(input: {
     lat: number;
     lng: number;
@@ -238,13 +409,16 @@ export const matchRepository = {
       user_id: row.user_id,
       status: row.status,
       joined_via: row.joined_via,
+      role: row.role,
       team_id: row.team_id,
       created_at: row.created_at,
       team_name: row.team_name,
       side: row.side,
       // A deactivated or missing profile yields null, as before; callers
       // already render a placeholder for that.
-      profile: row.full_name ? { full_name: row.full_name, area_name: row.area_name } : null,
+      profile: row.full_name
+        ? { full_name: row.full_name, area_name: row.area_name, avatar_url: row.avatar_url }
+        : null,
     }));
   },
 

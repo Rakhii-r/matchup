@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Alert, Pressable, StyleSheet, View } from 'react-native';
 
 import { useAuthStore } from '@core/auth/authStore';
@@ -6,7 +6,8 @@ import { AppError } from '@core/errors/AppError';
 import { REPORT_REASONS } from '@features/safety/domain/reportSchema';
 import type { ReportReason } from '@features/safety/domain/reportSchema';
 import { useBlockUser, useReportUser } from '@features/safety/presentation/useSafety';
-import { colors, radius, spacing } from '@shared/theme';
+import { radius, spacing, type AppColors } from '@shared/theme';
+import { useTheme } from '@shared/theme/ThemeContext';
 import { AppText } from '@shared/ui/AppText';
 
 interface ReportBlockBarProps {
@@ -26,6 +27,8 @@ export function ReportBlockBar({
   targetLabel = 'player',
 }: ReportBlockBarProps): React.ReactNode {
   const myId = useAuthStore((s) => s.session?.user.id);
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const report = useReportUser();
   const block = useBlockUser();
   const [showReasons, setShowReasons] = useState(false);
@@ -113,16 +116,17 @@ export function ReportBlockBar({
   );
 }
 
-const styles = StyleSheet.create({
-  wrap: { gap: spacing.sm, marginTop: spacing.xs },
-  row: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  reasons: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
-  reasonChip: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
-  },
-});
+const makeStyles = (colors: AppColors) =>
+  StyleSheet.create({
+    wrap: { gap: spacing.sm, marginTop: spacing.xs },
+    row: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+    reasons: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
+    reasonChip: {
+      paddingHorizontal: spacing.sm,
+      paddingVertical: spacing.xs,
+      borderRadius: radius.sm,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+    },
+  });

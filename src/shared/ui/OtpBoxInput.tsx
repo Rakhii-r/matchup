@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useMemo, useRef } from 'react';
 import {
   View,
   TextInput,
@@ -6,7 +6,7 @@ import {
   StyleSheet,
 } from 'react-native';
 
-import { radius, spacing } from '@shared/theme';
+import { spacing, type AppColors } from '@shared/theme';
 import { useTheme } from '@shared/theme/ThemeContext';
 import { AppText } from '@shared/ui/AppText';
 
@@ -24,6 +24,7 @@ export function OtpBoxInput({
   error = false,
 }: OtpBoxInputProps): React.ReactNode {
   const { colors, isDark } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
 
   const inputRef = useRef<TextInput>(null);
 
@@ -67,7 +68,7 @@ export function OtpBoxInput({
             ? filled
               ? '#1E2D3D'
               : '#111827'
-            : '#FFFFFF';
+            : colors.background;
 
           return (
             <View
@@ -98,7 +99,7 @@ export function OtpBoxInput({
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: AppColors) => StyleSheet.create({
   wrapper: {
     width: '100%',
     alignItems: 'center',
@@ -130,7 +131,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
 
-    backgroundColor: '#fff',
+    backgroundColor: colors.background,
   },
 
   digit: {

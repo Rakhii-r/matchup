@@ -222,3 +222,47 @@ export const IconClose = make(({ color, strokeWidth: w }) => (
     <Line x1="18" y1="6" x2="6" y2="18" {...s(color, w)} />
   </>
 ));
+
+/**
+ * Theme toggle glyphs. IconGear is a circle with radiating spokes and reads as
+ * a sun at small sizes, so these are deliberately distinct: the sun has a
+ * smaller core with longer rays, and the moon is a solid crescent.
+ */
+export const IconSun = make(({ color, strokeWidth: w }) => (
+  <>
+    <Circle cx="12" cy="12" r="4.2" {...s(color, w)} />
+    <Path
+      d="M12 1.8v2.4M12 19.8v2.4M3.5 3.5l1.7 1.7M18.8 18.8l1.7 1.7M1.8 12h2.4M19.8 12h2.4M3.5 20.5l1.7-1.7M18.8 5.2l1.7-1.7"
+      {...s(color, w)}
+    />
+  </>
+));
+
+export const IconMoon = make(({ color, strokeWidth: w }) => (
+  <Path d="M20.5 14.2A8.6 8.6 0 0 1 9.8 3.5a8.6 8.6 0 1 0 10.7 10.7z" {...s(color, w)} />
+));
+
+export const IconHome = make(({ color, strokeWidth: w }) => (
+  <>
+    <Path d="M3.2 10.4 12 3.4l8.8 7v9.2a1.4 1.4 0 0 1-1.4 1.4H4.6a1.4 1.4 0 0 1-1.4-1.4z" {...s(color, w)} />
+    <Path d="M9.2 21V12.6h5.6V21" {...s(color, w)} />
+  </>
+));
+
+export const IconUsers = make(({ color, strokeWidth: w }) => (
+  <>
+    <Path d="M16.2 20.4v-1.8a3.6 3.6 0 0 0-3.6-3.6H6a3.6 3.6 0 0 0-3.6 3.6v1.8" {...s(color, w)} />
+    <Circle cx="9.3" cy="7.6" r="3.4" {...s(color, w)} />
+    <Path d="M21.6 20.4v-1.8a3.6 3.6 0 0 0-2.7-3.5M15.6 4.4a3.6 3.6 0 0 1 0 6.9" {...s(color, w)} />
+  </>
+));
+
+export const IconCamera = make(({ color, strokeWidth: w }) => (
+  <>
+    <Path
+      d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"
+      {...s(color, w)}
+    />
+    <Circle cx="12" cy="13" r="4" {...s(color, w)} />
+  </>
+));

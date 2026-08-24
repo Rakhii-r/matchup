@@ -18,6 +18,10 @@ export const lightColors = {
   text: '#1A2330',
   textMuted: '#5B6675',
   textInverse: '#FFFFFF',
+  // Text placed on the auth screens' photographic background. That background
+  // carries a dark gradient overlay in BOTH schemes, so this stays white in
+  // light mode too — `text` would be near-invisible there.
+  onPhoto: '#FFFFFF',
 } as const;
 
 // Dark palette aligned to the sixfour24 mockup tokens (see mockTheme.ts) so the shared
@@ -37,16 +41,14 @@ export const darkColors = {
   text: '#FFFFFF',
   textMuted: '#A1A1AA',
   textInverse: '#141600',
+  onPhoto: '#FFFFFF',
 } as const;
 
 export type AppColors = { readonly [K in keyof typeof lightColors]: string };
 
-/**
- * Static token set used by screens that import `colors` directly (admin, match, etc.).
- * Points at the dark sixfour24 palette so those screens match the redesigned dark app.
- * @deprecated Prefer useTheme().colors in new components.
- */
-export const colors = darkColors;
+// There is deliberately no static `colors` export. It used to alias darkColors,
+// which meant every screen importing it rendered dark regardless of the theme
+// toggle. Read colours from `useTheme()` instead — it is the only accessor.
 
 export const spacing = {
   xs: 4,

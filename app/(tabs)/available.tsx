@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Switch, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -10,13 +10,12 @@ import {
   useRemoveAvailability,
   useSetAvailable,
 } from '@features/availability/presentation/useAvailability';
-import { M, R, S } from '@shared/theme/mockTheme';
+import { useSportLabel } from '@features/sports/presentation/useSports';
+import { R, S, useMock, type MockPalette } from '@shared/theme/mockTheme';
 import { AppLogo } from '@shared/ui/AppLogo';
 import { AppText } from '@shared/ui/AppText';
 import { IconBolt, IconGear, IconMenu, IconPin } from '@shared/ui/icons';
 import type { Sport } from '@shared/types/database.types';
-
-const SPORT_LABEL: Record<Sport, string> = { box_cricket: 'CRICKET', badminton: 'BADMINTON' };
 
 function initials(name: string): string {
   return name
@@ -28,6 +27,8 @@ function initials(name: string): string {
 }
 
 export default function AvailableScreen(): React.ReactNode {
+  const M = useMock();
+  const styles = useMemo(() => makeStyles(M), [M]);
   const session = useAuthStore((s) => s.session);
   const profile = useAuthStore((s) => s.profile);
   const [coords, setCoords] = useState<Coords | null>(null);
@@ -40,6 +41,7 @@ export default function AvailableScreen(): React.ReactNode {
   const setAvailable = useSetAvailable();
   const removeAvailability = useRemoveAvailability();
   const nearby = useNearbyAvailable(coords, null);
+  const sportLabel = useSportLabel();
 
   const isAvailable = (myAvail.data?.length ?? 0) > 0;
   const busy = setAvailable.isPending || removeAvailability.isPending;
@@ -62,7 +64,7 @@ export default function AvailableScreen(): React.ReactNode {
       <View style={styles.header}>
         <IconMenu color={M.text} />
         <AppLogo width={84} />
-        <IconGear color={M.text} />
+        <View style={{ width: 24 }} />
       </View>
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
@@ -125,7 +127,7 @@ export default function AvailableScreen(): React.ReactNode {
             <View key={p.id} style={styles.playerCard}>
               <View style={styles.avatarWrap}>
                 <View style={styles.avatar}>
-                  <AppText variant="label" color="#FFFFFF">
+                  <AppText variant="label" color={M.text}>
                     {initials(p.profile?.full_name ?? '?')}
                   </AppText>
                 </View>
@@ -139,7 +141,7 @@ export default function AvailableScreen(): React.ReactNode {
                 <View style={styles.metaRow}>
                   <View style={styles.sportBadge}>
                     <AppText variant="caption" color={M.ctaText} style={{ fontWeight: '700', fontSize: 11 }}>
-                      {SPORT_LABEL[p.sport]}
+                      {sportLabel(p.sport).toUpperCase()}
                     </AppText>
                   </View>
                 </View>
@@ -160,7 +162,7 @@ export default function AvailableScreen(): React.ReactNode {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (M: MockPalette) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: M.bg },
   header: {
     flexDirection: 'row',

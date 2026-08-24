@@ -1,21 +1,67 @@
 /**
- * Offers — fixtures the matcher put in front of one of my teams.
+ * Match Offers — one screen, two sides of the same open challenge.
  *
- * This is the accept side of an open challenge. Losing the race is a normal
- * outcome, not a failure: the RPC row-locks the challenge and the loser gets
+ * INCOMING (no params). Fixtures the matcher put in front of a team I belong
+ * to. This is the accept side: losing the race is a normal outcome, not a
+ * failure — the RPC row-locks the challenge and the loser gets
  * CHALLENGE_ALREADY_TAKEN, which is shown as information and the list refreshed.
+ *
+ * OUTGOING (`?challengeId=…`). The teams MY posted fixture was offered to,
+ * which is where the radar's "View Match Offers" lands. These rows come from
+ * `get_challenge_candidates`, not from the table: `teams` is members-only, so a
+ * plain select can only ever give the poster a uuid for a team they are not in.
+ * That RPC is the only place the poster can read a candidate's name, squad size
+ * and record.
+ *
+ * ACCEPTING ON THE OUTGOING SIDE. `accept_open_challenge` checks
+ * `teams.owner_id = auth.uid()` for the ACCEPTING team — NOT for the poster.
+ * A user who owns two squads can therefore legitimately take their own
+ * fixture on the other squad's behalf, which is why `get_challenge_candidates`
+ * returns `i_own_team` per row. Accept/Reject are shown on exactly those rows
+ * and nowhere else; on every other candidate the button would always fail, so
+ * the card keeps the "only their captain can take the fixture" line instead.
+ *
+ * VIEW DETAILS runs NO query. `/teams/[id]` is gated on `is_team_member`, and
+ * the poster is by definition not a member of a team they are matched against,
+ * so that route can only ever render "Unable to load team". Everything the
+ * owner wants shown — name, played, won, lost, win rate — is already on the
+ * candidate row the list is rendering from, so the detail sheet is a pure
+ * projection of the row in hand and touches no RLS surface at all.
  */
-import { useCallback, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, StyleSheet, View } from 'react-native';
-import { Stack, useRouter } from 'expo-router';
+import { useCallback, useMemo, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  Image,
+  Modal,
+  Pressable,
+  StyleSheet,
+  View,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 
 import { AppError } from '@core/errors/AppError';
-import { useAcceptOpenChallenge, useMyOffers } from '@features/teams/presentation/useChallenges';
-import type { OpenOffer } from '@features/teams/domain/challengeSchema';
-import { colors, radius, spacing } from '@shared/theme';
+import {
+  useAcceptOpenChallenge,
+  useApplyToChallenge,
+  useChallengeCandidatesFull,
+  useDeclineOpenChallenge,
+  useMyOffers,
+} from '@features/teams/presentation/useChallenges';
+import { useMyTeamsOverview } from '@features/teams/presentation/useTeams';
+import type { TeamOverviewRow } from '@features/teams/data/teamRepository';
+import type {
+  ChallengeCandidateFull,
+  OpenOffer,
+} from '@features/teams/domain/challengeSchema';
+import { R, S, useMock, type MockPalette } from '@shared/theme/mockTheme';
 import { AppText } from '@shared/ui/AppText';
-import { Button } from '@shared/ui/Button';
-import { Screen } from '@shared/ui/Screen';
+import { IconClose, IconUsers } from '@shared/ui/icons';
+
+/** Smallest comfortable tap target, same figure as the create-match wizard. */
+const TOUCH = 44;
 
 function formatWhen(iso: string): string {
   const d = new Date(iso);
@@ -34,118 +80,822 @@ function formatDistance(metres: number): string {
   return metres < 1000 ? `${Math.round(metres)} m away` : `${(metres / 1000).toFixed(1)} km away`;
 }
 
-export default function OffersScreen(): React.ReactNode {
-  const router = useRouter();
-  const offers = useMyOffers();
-  const accept = useAcceptOpenChallenge();
-  const [pendingId, setPendingId] = useState<string | null>(null);
+/** "12 played · 7 won · 58%" — or an honest line when nothing has been played. */
+function formatRecord(matchesPlayed: number, wins: number, winRate: number): string {
+  if (matchesPlayed <= 0) return 'No matches played yet';
+  return `${matchesPlayed} played · ${wins} won · ${winRate}% win rate`;
+}
 
-  const onAccept = useCallback(
+const CANDIDATE_STATUS_LABEL: Record<string, string> = {
+  offered: 'Scanned on Radar',
+  interested: '⚡ Requested Match (Wants to Play)',
+  accepted: 'Accepted',
+  declined: 'Declined',
+  expired: 'Expired',
+};
+
+/**
+ * The team block from the reference card: badge, name, squad size, record.
+ * Every figure is passed in from a real row — there is no default record.
+ */
+function TeamBlock({
+  name,
+  logoUrl,
+  playerCount,
+  matchesPlayed,
+  wins,
+  winRate,
+  styles,
+  M,
+}: {
+  name: string;
+  logoUrl: string | null;
+  playerCount: number;
+  matchesPlayed: number;
+  wins: number;
+  winRate: number;
+  styles: ReturnType<typeof makeStyles>;
+  M: MockPalette;
+}): React.ReactNode {
+  return (
+    <View style={styles.teamRow}>
+      {logoUrl ? (
+        <Image source={{ uri: logoUrl }} style={styles.badge} accessibilityIgnoresInvertColors />
+      ) : (
+        <View style={[styles.badge, styles.badgeFallback]}>
+          <AppText variant="label" color={M.limeInk}>
+            {name.trim().slice(0, 1).toUpperCase()}
+          </AppText>
+        </View>
+      )}
+      <View style={styles.teamText}>
+        <AppText variant="label" color={M.text} numberOfLines={1}>
+          {name}
+        </AppText>
+        <View style={styles.playersRow}>
+          <IconUsers size={14} color={M.faint} />
+          <AppText variant="caption" color={M.muted}>
+            {playerCount === 1 ? '1 Player' : `${playerCount} Players`}
+          </AppText>
+        </View>
+        <AppText variant="caption" color={M.faint}>
+          {formatRecord(matchesPlayed, wins, winRate)}
+        </AppText>
+      </View>
+    </View>
+  );
+}
+
+/** One figure in the sheet's stat strip. */
+function Stat({
+  label,
+  value,
+  styles,
+  M,
+}: {
+  label: string;
+  value: string;
+  styles: ReturnType<typeof makeStyles>;
+  M: MockPalette;
+}): React.ReactNode {
+  return (
+    <View style={styles.stat}>
+      <AppText variant="label" color={M.text}>
+        {value}
+      </AppText>
+      <AppText variant="caption" color={M.faint}>
+        {label}
+      </AppText>
+    </View>
+  );
+}
+
+/**
+ * Candidate details, rendered STRAIGHT FROM THE ROW — no fetch, no query key,
+ * no RLS surface. `get_challenge_candidates` already carries every field the
+ * owner asked for, so opening this sheet costs nothing and cannot fail the way
+ * `/teams/[id]` did.
+ *
+ * Deliberately nothing else here: no roster, no fixtures, no captain. Those all
+ * need `get_team_overview`, which is exactly the members-only call that made
+ * View Details show "Unable to load team".
+ */
+function CandidateSheet({
+  candidate,
+  onClose,
+  styles,
+  M,
+}: {
+  candidate: ChallengeCandidateFull | null;
+  onClose: () => void;
+  styles: ReturnType<typeof makeStyles>;
+  M: MockPalette;
+}): React.ReactNode {
+  return (
+    <Modal
+      transparent
+      visible={candidate !== null}
+      animationType="slide"
+      onRequestClose={onClose}
+    >
+      <Pressable
+        style={styles.sheetBackdrop}
+        onPress={onClose}
+        accessibilityRole="button"
+        accessibilityLabel="Close team details"
+      />
+      {candidate ? (
+        <View style={styles.sheet}>
+          <View style={styles.sheetHead}>
+            <AppText variant="heading" color={M.text}>
+              Team details
+            </AppText>
+            <Pressable
+              hitSlop={10}
+              onPress={onClose}
+              style={styles.sheetClose}
+              accessibilityRole="button"
+              accessibilityLabel="Close"
+            >
+              <IconClose color={M.muted} size={20} />
+            </Pressable>
+          </View>
+
+          <View style={styles.sheetTeam}>
+            {candidate.logo_url ? (
+              <Image
+                source={{ uri: candidate.logo_url }}
+                style={styles.sheetBadge}
+                accessibilityIgnoresInvertColors
+              />
+            ) : (
+              <View style={[styles.sheetBadge, styles.badgeFallback]}>
+                <AppText variant="heading" color={M.limeInk}>
+                  {candidate.team_name.trim().slice(0, 1).toUpperCase()}
+                </AppText>
+              </View>
+            )}
+            <View style={styles.teamText}>
+              <AppText variant="label" color={M.text} numberOfLines={2}>
+                {candidate.team_name}
+              </AppText>
+              <View style={styles.playersRow}>
+                <IconUsers size={14} color={M.faint} />
+                <AppText variant="caption" color={M.muted}>
+                  {candidate.player_count === 1
+                    ? '1 Player'
+                    : `${candidate.player_count} Players`}
+                </AppText>
+              </View>
+              <AppText variant="caption" color={M.faint}>
+                {formatDistance(candidate.distance_m)}
+              </AppText>
+            </View>
+          </View>
+
+          {/* A row of zeroes reads as a broken screen, so say it plainly. */}
+          {candidate.matches_played === 0 ? (
+            <AppText variant="body" color={M.muted} style={styles.sheetEmpty}>
+              No matches played yet
+            </AppText>
+          ) : (
+            <View style={styles.statRow}>
+              <Stat
+                label="Played"
+                value={String(candidate.matches_played)}
+                styles={styles}
+                M={M}
+              />
+              <Stat label="Won" value={String(candidate.wins)} styles={styles} M={M} />
+              <Stat label="Lost" value={String(candidate.losses)} styles={styles} M={M} />
+              {/* Ties only when there are any — most sports never draw. */}
+              {candidate.ties > 0 ? (
+                <Stat label="Tied" value={String(candidate.ties)} styles={styles} M={M} />
+              ) : null}
+              <Stat
+                label="Win rate"
+                value={`${candidate.win_rate}%`}
+                styles={styles}
+                M={M}
+              />
+            </View>
+          )}
+
+          <Pressable
+            onPress={onClose}
+            style={[styles.btn, styles.btnPrimary, styles.sheetCta]}
+            accessibilityRole="button"
+          >
+            <AppText variant="label" color={M.limeInk}>
+              Close
+            </AppText>
+          </Pressable>
+        </View>
+      ) : null}
+    </Modal>
+  );
+}
+
+export default function OffersScreen(): React.ReactNode {
+  const M = useMock();
+  const styles = useMemo(() => makeStyles(M), [M]);
+  const router = useRouter();
+  const { challengeId: rawId } = useLocalSearchParams<{ challengeId?: string }>();
+  const challengeId = typeof rawId === 'string' && rawId.length > 0 ? rawId : null;
+
+  // Both queries are declared unconditionally — hooks cannot sit behind the
+  // mode check — and each is disabled in the mode it does not serve.
+  const offers = useMyOffers();
+  // The poster's own candidate list keeps polling here for the same reason it
+  // does on the radar: a team can accept while this screen is open.
+  const candidates = useChallengeCandidatesFull(challengeId);
+  const myTeams = useMyTeamsOverview();
+  const accept = useAcceptOpenChallenge();
+  const applyToChallenge = useApplyToChallenge();
+  const decline = useDeclineOpenChallenge();
+  const [pendingId, setPendingId] = useState<string | null>(null);
+  /**
+   * Which candidate button is spinning. Both Accept and Reject are disabled
+   * whenever either mutation is in flight, so a double tap cannot fire twice;
+   * this only decides where the spinner is drawn.
+   */
+  const [candidateAction, setCandidateAction] = useState<{
+    id: string;
+    kind: 'accept' | 'reject';
+  } | null>(null);
+  /** The row the detail sheet is showing. Held, not fetched. */
+  const [detail, setDetail] = useState<ChallengeCandidateFull | null>(null);
+
+  const outgoing = challengeId !== null;
+  const candidateBusy = accept.isPending || decline.isPending || applyToChallenge.isPending;
+
+  /** My teams by id, so an incoming card can show that squad's real record. */
+  const myTeamById = useMemo(() => {
+    const map = new Map<string, TeamOverviewRow>();
+    for (const team of myTeams.data ?? []) map.set(team.id, team);
+    return map;
+  }, [myTeams.data]);
+
+  /** Filter out any teams the user owns or belongs to from candidate offers. */
+  const filteredCandidates = useMemo(() => {
+    return (candidates.data ?? []).filter(
+      (item) => !myTeamById.has(item.team_id) && !item.i_own_team,
+    );
+  }, [candidates.data, myTeamById]);
+
+  const onSendRequest = useCallback(
     (offer: OpenOffer) => {
       if (!offer.challenge) return;
       setPendingId(offer.id);
-      accept.mutate(
+      applyToChallenge.mutate(
         { challengeId: offer.challenge_id, teamId: offer.team_id },
         {
-          onSuccess: (challenge) => {
+          onSuccess: () => {
             setPendingId(null);
-            if (challenge.match_id) {
-              router.replace(`/match/${challenge.match_id}`);
-            } else {
-              void offers.refetch();
-            }
+            Alert.alert(
+              'Request Sent! ⚡',
+              'Your match request was sent! The opponent team captain has been notified to accept.',
+            );
+            void offers.refetch();
           },
           onError: (error: unknown) => {
             setPendingId(null);
             const message =
-              error instanceof AppError ? error.message : 'Could not accept the fixture.';
-            Alert.alert('Fixture', message);
-            // Whether we lost the race or hit a validation rule, the list is
-            // now stale either way.
+              error instanceof AppError ? error.message : 'Could not send the match request.';
+            Alert.alert('Match Request', message);
             void offers.refetch();
           },
         },
       );
     },
-    [accept, offers, router],
+    [applyToChallenge, offers],
   );
 
-  const renderItem = useCallback(
+  /**
+   * Take my OWN other squad's offer. Only ever reachable from a row with
+   * `i_own_team` — `accept_open_challenge` checks the accepting team's owner,
+   * and NOT_TEAM_OWNER comes back as readable copy from the repository if the
+   * row ever lies.
+   */
+  const onAcceptCandidate = useCallback(
+    (item: ChallengeCandidateFull) => {
+      if (challengeId === null) return;
+      setCandidateAction({ id: item.candidate_id, kind: 'accept' });
+      accept.mutate(
+        { challengeId, teamId: item.team_id },
+        {
+          onSuccess: (challenge) => {
+            setCandidateAction(null);
+            // The RPC calls finalise_challenge, so the row comes back with the
+            // new match. Replace rather than push: going "back" to a candidate
+            // list that is now settled is a dead end.
+            if (challenge.match_id) router.replace(`/match/${challenge.match_id}`);
+            else router.replace('/(tabs)/matches');
+          },
+          onError: (error: unknown) => {
+            setCandidateAction(null);
+            Alert.alert(
+              'Fixture',
+              error instanceof AppError ? error.message : 'Could not accept the fixture.',
+            );
+            // Lost the race or hit a rule — the list is stale either way.
+            void candidates.refetch();
+          },
+        },
+      );
+    },
+    [accept, candidates, challengeId, router],
+  );
+
+  const onRejectCandidate = useCallback(
+    (item: ChallengeCandidateFull) => {
+      if (challengeId === null) return;
+      Alert.alert(
+        'Reject this offer?',
+        `${item.team_name} will no longer be able to take this fixture.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Reject',
+            style: 'destructive',
+            onPress: () => {
+              setCandidateAction({ id: item.candidate_id, kind: 'reject' });
+              decline.mutate(
+                { challengeId, teamId: item.team_id },
+                {
+                  onSuccess: () => {
+                    setCandidateAction(null);
+                    void candidates.refetch();
+                  },
+                  onError: (error: unknown) => {
+                    setCandidateAction(null);
+                    Alert.alert(
+                      'Fixture',
+                      error instanceof AppError
+                        ? error.message
+                        : 'Could not reject this offer.',
+                    );
+                    void candidates.refetch();
+                  },
+                },
+              );
+            },
+          },
+        ],
+      );
+    },
+    [candidates, challengeId, decline],
+  );
+
+  const closeDetail = useCallback(() => setDetail(null), []);
+
+  const renderIncoming = useCallback(
     ({ item }: { item: OpenOffer }) => {
       if (!item.challenge) return null;
       const busy = pendingId === item.id;
+      const team = myTeamById.get(item.team_id);
+      const isInterested = item.status === 'interested';
+
       return (
         <View style={styles.card}>
-          <AppText style={styles.title}>{item.challenge.match_name}</AppText>
-          <AppText style={styles.meta}>{formatWhen(item.challenge.scheduled_at)}</AppText>
-          <AppText style={styles.meta}>
+          <AppText variant="label" color={M.text}>
+            {item.challenge.match_name}
+          </AppText>
+          <AppText variant="caption" color={M.muted}>
+            {formatWhen(item.challenge.scheduled_at)}
+          </AppText>
+          <AppText variant="caption" color={M.muted}>
             {formatDistance(item.distance_m)} · {item.challenge.total_slots} players
           </AppText>
-          <AppText style={styles.meta}>For {item.team?.name ?? 'your team'}</AppText>
-          {item.challenge.message ? (
-            <AppText style={styles.message}>{item.challenge.message}</AppText>
-          ) : null}
-          <View style={styles.cta}>
-            <Button
-              label="Accept fixture"
-              onPress={() => onAccept(item)}
-              loading={busy}
-              disabled={accept.isPending}
+
+          {team ? (
+            <TeamBlock
+              name={team.name}
+              logoUrl={team.logo_url}
+              playerCount={team.player_count}
+              matchesPlayed={team.matches_played}
+              wins={team.wins}
+              winRate={team.win_rate}
+              styles={styles}
+              M={M}
             />
+          ) : (
+            // The overview call is the only source for squad size and record.
+            // While it is in flight, say so rather than printing zeroes.
+            <View style={styles.teamRow}>
+              {myTeams.isLoading ? <ActivityIndicator color={M.green} /> : null}
+              <AppText variant="caption" color={M.muted}>
+                {myTeams.isError
+                  ? 'Could not load your squad’s details.'
+                  : myTeams.isLoading
+                    ? 'Loading your squad…'
+                    : `Offered to ${item.team?.name ?? 'your team'}`}
+              </AppText>
+            </View>
+          )}
+
+          {item.challenge.message ? (
+            <AppText variant="body" color={M.text} style={styles.message}>
+              {item.challenge.message}
+            </AppText>
+          ) : null}
+
+          {isInterested ? (
+            <View style={{ paddingVertical: 4 }}>
+              <AppText variant="caption" color={M.green} style={{ fontWeight: '700' }}>
+                ⚡ Match Request Sent · Waiting for opponent captain to accept
+              </AppText>
+            </View>
+          ) : null}
+
+          <View style={styles.ctaRow}>
+            <Pressable
+              onPress={() => router.push(`/teams/${item.team_id}`)}
+              style={[styles.btn, styles.btnGhost]}
+              accessibilityRole="button"
+            >
+              <AppText variant="label" color={M.green}>
+                View Details
+              </AppText>
+            </Pressable>
+            {!isInterested ? (
+              <Pressable
+                onPress={() => onSendRequest(item)}
+                disabled={applyToChallenge.isPending || busy}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: applyToChallenge.isPending || busy, busy }}
+                style={[
+                  styles.btn,
+                  styles.btnPrimary,
+                  { opacity: applyToChallenge.isPending || busy ? 0.45 : 1 },
+                ]}
+              >
+                {busy ? <ActivityIndicator color={M.limeInk} /> : null}
+                <AppText variant="label" color={M.limeInk}>
+                  Send Request
+                </AppText>
+              </Pressable>
+            ) : null}
           </View>
+
+          <Pressable
+            disabled={busy || decline.isPending}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: busy || decline.isPending }}
+            style={[styles.declineBtn, { opacity: busy || decline.isPending ? 0.45 : 1 }]}
+            onPress={() =>
+              Alert.alert(
+                isInterested ? 'Withdraw request?' : 'Decline offer?',
+                isInterested
+                  ? 'Your match request will be cancelled.'
+                  : 'This offer will no longer be available to your team.',
+                [
+                  { text: 'Cancel', style: 'cancel' },
+                  {
+                    text: isInterested ? 'Withdraw' : 'Decline',
+                    style: 'destructive',
+                    onPress: () =>
+                      decline.mutate(
+                        { challengeId: item.challenge_id, teamId: item.team_id },
+                        {
+                          onSuccess: () => {
+                            void offers.refetch();
+                          },
+                        },
+                      ),
+                  },
+                ],
+              )
+            }
+          >
+            <AppText variant="caption" color={M.danger}>
+              {isInterested ? 'Withdraw Request' : 'Decline'}
+            </AppText>
+          </Pressable>
         </View>
       );
     },
-    [accept.isPending, onAccept, pendingId],
+    [
+      M,
+      applyToChallenge.isPending,
+      decline,
+      myTeamById,
+      myTeams.isError,
+      myTeams.isLoading,
+      offers,
+      onSendRequest,
+      pendingId,
+      router,
+      styles,
+    ],
   );
 
-  return (
-    <Screen>
-      <Stack.Screen options={{ title: 'Match offers' }} />
-      {offers.isLoading ? (
-        <View style={styles.centre}>
-          <ActivityIndicator />
-        </View>
-      ) : offers.isError ? (
-        <View style={styles.centre}>
-          <AppText style={styles.meta}>Could not load offers.</AppText>
-          <View style={styles.cta}>
-            <Button label="Try again" onPress={() => void offers.refetch()} />
+  const renderCandidate = useCallback(
+    ({ item }: { item: ChallengeCandidateFull }) => {
+      // The host can accept any interested applicant, or a captain can accept an offer for their squad
+      const canAct = (outgoing && item.status === 'interested') || (item.i_own_team && item.status === 'offered');
+      const accepting =
+        candidateAction?.id === item.candidate_id && candidateAction.kind === 'accept';
+      const rejecting =
+        candidateAction?.id === item.candidate_id && candidateAction.kind === 'reject';
+
+      return (
+        <View style={styles.card}>
+          <TeamBlock
+            name={item.team_name}
+            logoUrl={item.logo_url}
+            playerCount={item.player_count}
+            matchesPlayed={item.matches_played}
+            wins={item.wins}
+            winRate={item.win_rate}
+            styles={styles}
+            M={M}
+          />
+          <AppText variant="caption" color={item.status === 'interested' ? M.green : M.muted}>
+            {formatDistance(item.distance_m)} ·{' '}
+            {CANDIDATE_STATUS_LABEL[item.status] ?? item.status}
+          </AppText>
+
+          <View style={styles.ctaRow}>
+            <Pressable
+              onPress={() => router.push(`/teams/${item.team_id}`)}
+              style={[styles.btn, styles.btnGhost]}
+              accessibilityRole="button"
+              accessibilityLabel={`View team profile for ${item.team_name}`}
+            >
+              <AppText variant="label" color={M.green}>
+                View Team
+              </AppText>
+            </Pressable>
+            <Pressable
+              onPress={() => setDetail(item)}
+              style={[styles.btn, styles.btnGhost]}
+              accessibilityRole="button"
+              accessibilityLabel={`View details for ${item.team_name}`}
+            >
+              <AppText variant="label" color={M.muted}>
+                Details
+              </AppText>
+            </Pressable>
           </View>
+
+          {canAct ? (
+            <View style={styles.ctaRow}>
+              <Pressable
+                onPress={() => onAcceptCandidate(item)}
+                disabled={candidateBusy}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: candidateBusy, busy: accepting }}
+                style={[styles.btn, styles.btnPrimary, { opacity: candidateBusy ? 0.45 : 1 }]}
+              >
+                {accepting ? <ActivityIndicator color={M.limeInk} /> : null}
+                <AppText variant="label" color={M.limeInk}>
+                  {outgoing ? '✓ Accept Request' : 'Accept Offer'}
+                </AppText>
+              </Pressable>
+              <Pressable
+                onPress={() => onRejectCandidate(item)}
+                disabled={candidateBusy}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: candidateBusy, busy: rejecting }}
+                style={[styles.btn, styles.btnDanger, { opacity: candidateBusy ? 0.45 : 1 }]}
+              >
+                {rejecting ? <ActivityIndicator color={M.danger} /> : null}
+                <AppText variant="label" color={M.danger}>
+                  Decline
+                </AppText>
+              </Pressable>
+            </View>
+          ) : item.status === 'offered' ? (
+            <AppText variant="caption" color={M.faint}>
+              Scanned on Radar · Waiting for opponent team to challenge.
+            </AppText>
+          ) : null}
         </View>
+      );
+    },
+    [M, candidateAction, candidateBusy, onAcceptCandidate, onRejectCandidate, outgoing, styles],
+  );
+
+  // Split rather than a union of the two query objects: they resolve to
+  // different row types, and only these three facts are shared.
+  const isLoading = outgoing ? candidates.isLoading : offers.isLoading;
+  const isError = outgoing ? candidates.isError : offers.isError;
+  const onRetry = useCallback(() => {
+    if (outgoing) void candidates.refetch();
+    else void offers.refetch();
+  }, [candidates, offers, outgoing]);
+
+  return (
+    <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
+      <Stack.Screen options={{ title: 'Match offers' }} />
+
+      {isLoading ? (
+        <View style={styles.centre}>
+          <ActivityIndicator color={M.green} />
+        </View>
+      ) : isError ? (
+        <View style={styles.centre}>
+          <AppText variant="body" color={M.danger} center>
+            {outgoing ? 'Could not load the teams this fixture reached.' : 'Could not load offers.'}
+          </AppText>
+          <Pressable onPress={onRetry} style={styles.secondaryBtn} accessibilityRole="button">
+            <AppText variant="label" color={M.green}>
+              Try again
+            </AppText>
+          </Pressable>
+        </View>
+      ) : outgoing ? (
+        <FlatList
+          data={filteredCandidates}
+          keyExtractor={(item) => item.candidate_id}
+          renderItem={renderCandidate}
+          refreshing={candidates.isRefetching}
+          onRefresh={() => void candidates.refetch()}
+          contentContainerStyle={styles.list}
+          ListHeaderComponent={
+            <View style={{ gap: S.sm, marginBottom: S.xs }}>
+              <Pressable
+                onPress={() => {
+                  if (challengeId) {
+                    router.push({
+                      pathname: '/match/create/searching',
+                      params: { challengeId },
+                    });
+                  }
+                }}
+                style={styles.radarButton}
+                accessibilityRole="button"
+                accessibilityLabel="Switch to Live Radar View"
+              >
+                <View style={styles.radarPill}>
+                  <View style={styles.radarDot} />
+                  <AppText variant="caption" color={M.limeInk} style={{ fontWeight: '800', fontSize: 10 }}>
+                    LIVE RADAR
+                  </AppText>
+                </View>
+                <AppText variant="label" color={M.text} style={{ flex: 1, fontSize: 14 }}>
+                  Switch to Radar Dish View
+                </AppText>
+                <AppText color={M.green}>›</AppText>
+              </Pressable>
+              <AppText variant="caption" color={M.muted}>
+                Teams your fixture was offered to. The first to accept gets the match.
+              </AppText>
+            </View>
+          }
+          ListEmptyComponent={
+            <View style={styles.centre}>
+              <AppText variant="label" color={M.text} center>
+                No teams reached yet
+              </AppText>
+              <AppText variant="caption" color={M.muted} center>
+                Nobody nearby matched this fixture. Withdraw it and post again with a
+                wider search radius.
+              </AppText>
+            </View>
+          }
+        />
       ) : (
         <FlatList
           data={offers.data ?? []}
           keyExtractor={(item) => item.id}
-          renderItem={renderItem}
+          renderItem={renderIncoming}
           refreshing={offers.isRefetching}
           onRefresh={() => void offers.refetch()}
           contentContainerStyle={styles.list}
           ListEmptyComponent={
             <View style={styles.centre}>
-              <AppText style={styles.title}>No offers right now</AppText>
-              <AppText style={styles.meta}>
+              <AppText variant="label" color={M.text} center>
+                No offers right now
+              </AppText>
+              <AppText variant="caption" color={M.muted} center>
                 When a nearby team posts a fixture that fits your squad, it appears here.
               </AppText>
             </View>
           }
         />
       )}
-    </Screen>
+
+      {/* Pure projection of the row already in memory — no query is issued. */}
+      <CandidateSheet candidate={detail} onClose={closeDetail} styles={styles} M={M} />
+    </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  list: { padding: spacing.md, gap: spacing.md },
-  centre: { padding: spacing.xl, alignItems: 'center', gap: spacing.sm },
-  card: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.md,
-    padding: spacing.md,
-    gap: spacing.xs,
-  },
-  title: { fontSize: 17, fontWeight: '600', color: colors.text },
-  meta: { fontSize: 14, color: colors.textMuted },
-  message: { fontSize: 14, color: colors.text, marginTop: spacing.xs },
-  cta: { marginTop: spacing.sm },
-});
+const makeStyles = (M: MockPalette) =>
+  StyleSheet.create({
+    safe: { flex: 1, backgroundColor: M.bg },
+    list: { padding: S.md, gap: S.md },
+    centre: { padding: S.xl, alignItems: 'center', gap: S.sm },
+    card: {
+      backgroundColor: M.card,
+      borderRadius: R.lg,
+      borderWidth: 1,
+      borderColor: M.border,
+      padding: S.md,
+      gap: S.xs,
+    },
+    teamRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: S.sm,
+      marginTop: S.sm,
+      paddingTop: S.sm,
+      borderTopWidth: 1,
+      borderTopColor: M.border,
+    },
+    teamText: { flex: 1, gap: 2 },
+    playersRow: { flexDirection: 'row', alignItems: 'center', gap: S.xs },
+    badge: { width: 44, height: 44, borderRadius: R.pill, backgroundColor: M.chip },
+    badgeFallback: { alignItems: 'center', justifyContent: 'center', backgroundColor: M.lime },
+    message: { marginTop: S.xs },
+    ctaRow: { flexDirection: 'row', gap: S.sm, marginTop: S.sm },
+    btn: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: S.xs,
+      minHeight: TOUCH,
+      borderRadius: R.pill,
+      paddingHorizontal: S.md,
+    },
+    btnGhost: { borderWidth: 1.5, borderColor: M.green },
+    btnPrimary: { backgroundColor: M.green },
+    btnDanger: { borderWidth: 1.5, borderColor: M.danger },
+    sheetBackdrop: { flex: 1, backgroundColor: M.overlay },
+    sheet: {
+      backgroundColor: M.card,
+      borderTopLeftRadius: 24,
+      borderTopRightRadius: 24,
+      padding: S.lg,
+      borderTopWidth: 1,
+      borderColor: M.border,
+      gap: S.sm,
+    },
+    sheetHead: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    sheetClose: {
+      width: TOUCH,
+      height: TOUCH,
+      alignItems: 'flex-end',
+      justifyContent: 'center',
+    },
+    sheetTeam: { flexDirection: 'row', alignItems: 'center', gap: S.md },
+    sheetBadge: { width: 64, height: 64, borderRadius: R.pill, backgroundColor: M.chip },
+    sheetEmpty: { marginTop: S.sm },
+    statRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      marginTop: S.sm,
+      paddingTop: S.md,
+      borderTopWidth: 1,
+      borderTopColor: M.border,
+    },
+    stat: { flexGrow: 1, flexBasis: 72, alignItems: 'center', gap: 2 },
+    sheetCta: { marginTop: S.md },
+    declineBtn: {
+      minHeight: TOUCH,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginTop: S.xs,
+    },
+    secondaryBtn: {
+      minHeight: TOUCH,
+      paddingHorizontal: S.lg,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderRadius: R.pill,
+      borderWidth: 1.5,
+      borderColor: M.green,
+    },
+    radarButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: S.sm,
+      padding: S.md,
+      borderRadius: R.lg,
+      borderWidth: 1.5,
+      borderColor: M.green,
+      backgroundColor: M.card,
+    },
+    radarPill: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+      borderRadius: R.pill,
+      backgroundColor: M.green,
+    },
+    radarDot: {
+      width: 6,
+      height: 6,
+      borderRadius: 3,
+      backgroundColor: M.limeInk,
+    },
+  });

@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import {
   ActivityIndicator,
   ImageBackground,
@@ -12,26 +13,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 
 import { useVenues } from '@features/venues/presentation/useVenues';
-import { SPORT_LABEL } from '@features/venues/domain/venueSchema';
+import { useSportLabel } from '@features/sports/presentation/useSports';
 import type { Venue } from '@features/venues/domain/venueSchema';
-import type { Sport } from '@shared/types/database.types';
-import { M, R, S } from '@shared/theme/mockTheme';
+import { R, S, useMock, type MockPalette } from '@shared/theme/mockTheme';
 import { AppLogo } from '@shared/ui/AppLogo';
 import { AppText } from '@shared/ui/AppText';
-import { IconDirections, IconGear, IconMenu, IconPin, IconSearch, IconSliders } from '@shared/ui/icons';
-
-/* eslint-disable @typescript-eslint/no-require-imports */
-const SPORT_IMAGE: Record<Sport, number> = {
-  box_cricket: require('../../assets/images/cricket.jpg') as number,
-  badminton: require('../../assets/images/badminton.jpg') as number,
-};
-/* eslint-enable @typescript-eslint/no-require-imports */
-
-/** Pick a header image from the venue's first sport; default to cricket. */
-function venueImage(sportTypes: Sport[]): number {
-  const first = sportTypes[0];
-  return first ? SPORT_IMAGE[first] : SPORT_IMAGE.box_cricket;
-}
+import { IconDirections, IconMenu, IconPin, IconSearch, IconSliders } from '@shared/ui/icons';
+import { venueImage } from '@shared/ui/sportImages';
 
 function openDirections(v: Venue): void {
   const label = encodeURIComponent(v.name);
@@ -43,14 +31,17 @@ function callVenue(phone: string): void {
 }
 
 export default function VenuesScreen(): React.ReactNode {
+  const M = useMock();
+  const styles = useMemo(() => makeStyles(M), [M]);
   const { data: venues, isLoading, isError, refetch, isRefetching } = useVenues();
+  const sportLabel = useSportLabel();
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
       <View style={styles.header}>
         <IconMenu color={M.text} />
         <AppLogo width={84} />
-        <IconGear color={M.text} />
+        <View style={{ width: 24 }} />
       </View>
 
       <ScrollView
@@ -95,7 +86,7 @@ export default function VenuesScreen(): React.ReactNode {
         ) : (
           (venues ?? []).map((v) => (
             <View key={v.id} style={styles.card}>
-              <ImageBackground source={venueImage(v.sport_types)} style={styles.imageWrap}>
+              <ImageBackground source={venueImage(v)} style={styles.imageWrap}>
                 <LinearGradient
                   colors={['rgba(0,0,0,0.05)', 'rgba(0,0,0,0.55)']}
                   start={{ x: 0, y: 0 }}
@@ -122,7 +113,7 @@ export default function VenuesScreen(): React.ReactNode {
                   {v.sport_types.map((s) => (
                     <View key={s} style={styles.chip}>
                       <AppText variant="caption" color={M.muted}>
-                        {SPORT_LABEL[s]}
+                        {sportLabel(s)}
                       </AppText>
                     </View>
                   ))}
@@ -155,7 +146,7 @@ export default function VenuesScreen(): React.ReactNode {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (M: MockPalette) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: M.bg },
   header: {
     flexDirection: 'row',

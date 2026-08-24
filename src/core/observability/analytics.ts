@@ -28,6 +28,9 @@ export type AnalyticsEvent =
   | 'match_created'
   | 'match_browsed'
   | 'join_requested'
+  // Taking a seat in a Post a Match fixture. Distinct from 'join_requested',
+  // which is a request awaiting an organiser — this one is already confirmed.
+  | 'open_match_joined'
   | 'player_needed_sent'
   | 'interest_approved'
   | 'team_locked'

@@ -34,6 +34,15 @@ export function usePerformToss(matchId: string) {
   });
 }
 
+/** Re-roll. Captain-only and refused after bat/bowl is chosen — enforced server-side. */
+export function useRedoToss(matchId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => tossRepository.redo(matchId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['match', matchId] }),
+  });
+}
+
 export function useSetTossDecision(matchId: string) {
   const qc = useQueryClient();
   return useMutation({

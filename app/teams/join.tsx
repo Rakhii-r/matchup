@@ -5,13 +5,15 @@ import { Stack, useRouter } from 'expo-router';
 import { AppError } from '@core/errors/AppError';
 import { TeamInviteCodeSchema } from '@features/teams/domain/teamSchema';
 import { useJoinTeamByCode } from '@features/teams/presentation/useTeams';
-import { colors, spacing } from '@shared/theme';
+import { spacing } from '@shared/theme';
+import { useTheme } from '@shared/theme/ThemeContext';
 import { AppText } from '@shared/ui/AppText';
 import { Button } from '@shared/ui/Button';
 import { Screen } from '@shared/ui/Screen';
 import { TextField } from '@shared/ui/TextField';
 
 export default function JoinTeamScreen(): React.ReactNode {
+  const { colors } = useTheme();
   const router = useRouter();
   const joinTeam = useJoinTeamByCode();
   const [code, setCode] = useState('');

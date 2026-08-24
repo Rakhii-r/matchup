@@ -1,0 +1,27 @@
+appId: com.asrdigi.matchup
+---
+# Flow 2: Matches Feed & Sport Filter
+- launchApp
+
+# 1. Navigate to Matches Tab
+- tapOn: "Matches"
+- assertVisible: "Matches near you"
+
+# 2. Verify Action Buttons
+- assertVisible: "Create Match"
+- assertVisible: "Join with code"
+
+# 3. Test Sport Card Filter Toggle
+- tapOn: "Cricket"
+- assertVisible: "Showing Cricket only"
+
+- tapOn: "Badminton"
+- assertVisible: "Showing Badminton only"
+
+# Tap again to clear filter
+- tapOn: "Badminton"
+- assertVisible: "Showing all sports.*"
+
+# 4. Scroll Feed
+- scroll
+- assertVisible: ".*matches.*"

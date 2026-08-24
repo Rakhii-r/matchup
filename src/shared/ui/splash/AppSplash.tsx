@@ -6,7 +6,7 @@
  *
  * Intentionally has NO useTheme() dependency — always renders dark.
  */
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { StyleSheet, Animated, Dimensions } from 'react-native';
 
 import { SplashBackground } from './SplashBackground';
@@ -21,7 +21,7 @@ interface AppSplashProps {
 }
 
 export function AppSplash({ visible, onHidden }: AppSplashProps): React.ReactNode {
-  const opacity = useRef(new Animated.Value(1)).current;
+  const opacity = useMemo(() => new Animated.Value(1), []);
   const mounted = useRef(true);
 
   useEffect(() => {

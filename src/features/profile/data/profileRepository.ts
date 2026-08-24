@@ -18,10 +18,24 @@ export interface UpdateProfileInput {
   fullName: string;
   areaName: string;
   sportPref: Sport[];
+  avatarUrl?: string | null;
+  /**
+   * Coordinates were previously settable only at signup. Anyone who declined
+   * the location prompt then had null coords forever, which silently disables
+   * every nearby feature with no way back — the Edit Profile screen had no
+   * field that could repair it. Same three-valued rule as avatarUrl:
+   * `undefined` leaves the stored value alone.
+   */
+  homeLat?: number | null;
+  homeLng?: number | null;
 }
 
 /** Reads/writes the current user's profile. RLS restricts writes to id = auth.uid(). */
 export const profileRepository = {
+  async removeAvatar(userId: string): Promise<void> {
+    const { error } = await supabase.storage.from('avatars').remove([`${userId}/avatar.jpg`]);
+    if (error) throw toAppError(error);
+  },
   /**
    * Uploads a JPEG avatar (passed as base64 from the image picker) to the public
    * `avatars` bucket under `<userId>/avatar.jpg` and returns its public URL. Storage RLS
@@ -73,6 +87,12 @@ export const profileRepository = {
     return data;
   },
 
+  /**
+   * `avatarUrl` is deliberately three-valued: a string sets a new photo, `null`
+   * clears it, and `undefined` means "not part of this edit" and must leave the
+   * stored URL alone. Writing `input.avatarUrl ?? null` here would silently
+   * erase the user's photo on every unrelated name or area change.
+   */
   async update(input: UpdateProfileInput): Promise<Profile> {
     const { data, error } = await supabase
       .from('profiles')
@@ -80,6 +100,9 @@ export const profileRepository = {
         full_name: input.fullName,
         area_name: input.areaName,
         sport_pref: input.sportPref,
+        ...(input.avatarUrl !== undefined ? { avatar_url: input.avatarUrl } : {}),
+        ...(input.homeLat !== undefined ? { home_lat: input.homeLat } : {}),
+        ...(input.homeLng !== undefined ? { home_lng: input.homeLng } : {}),
       })
       .eq('id', input.userId)
       .select('*')

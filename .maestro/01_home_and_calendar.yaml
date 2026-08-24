@@ -1,0 +1,34 @@
+appId: com.asrdigi.matchup
+---
+# Flow 1: Home Dashboard & Calendar Schedule Modal
+- launchApp
+
+# 1. Verify Home Screen Elements
+- assertVisible: "Good.*"
+- assertVisible: "\\+ Create a Match"
+- assertVisible: "SPORTS"
+- assertVisible: "GAMES NEAR YOU"
+- assertVisible: "VENUES"
+
+# 2. Open Calendar Modal
+- tapOn:
+    accessibilityLabel: "Your match schedule"
+- assertVisible: "My Schedule"
+- assertVisible: "Sun"
+- assertVisible: "Mon"
+- assertVisible: "Tue"
+
+# 3. Test Month Navigation
+- tapOn:
+    accessibilityLabel: "Next month"
+- tapOn:
+    accessibilityLabel: "Previous month"
+
+# 4. Tap a Date Cell to inspect bookings
+- tapOn: "15"
+- assertVisible: ".*matches.*"
+
+# 5. Close Calendar Modal
+- tapOn:
+    accessibilityLabel: "Close calendar"
+- assertNotVisible: "My Schedule"

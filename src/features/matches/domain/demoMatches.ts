@@ -106,6 +106,7 @@ export const DEMO_MATCHES: Match[] = SEEDS.map((seed) => ({
   sport: seed.sport,
   venue_id: null,
   venue_text: seed.venue,
+  area_name: seed.venue,
   scheduled_at: seed.when,
   // Demo rows are never fixtures and are never scored, so the
   // head-to-head and format columns are always null.
@@ -123,6 +124,20 @@ export const DEMO_MATCHES: Match[] = SEEDS.map((seed) => ({
   share_code: seed.id.toUpperCase(),
   lat: 17.4849,
   lng: 78.3915,
+  match_lat: 17.4849,
+  match_lng: 78.3915,
   notes: seed.name,
   created_at: new Date().toISOString(),
+  // Columns added to `matches` after these seeds were written. They are typed
+  // as required on the Row, so leaving them out no longer compiles — and a demo
+  // row has to look like something the app could really have produced.
+  game_type: 'friendly',
+  end_time: null,
+  // Null, so the demo rows are never filtered out of Nearby by the poster's own
+  // search distance the way a real open match can be.
+  search_radius_m: null,
+  // Demo rows are team fixtures by shape: they have no roster to join, and
+  // isDemoMatch() intercepts the Join button before any RPC is called.
+  match_type: 'team_vs_team',
+  rematch_of: null,
 }));

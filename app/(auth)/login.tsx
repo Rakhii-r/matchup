@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import {
   View,
   TextInput,
@@ -15,7 +15,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 
 import { useOtp } from '@features/auth/presentation/useOtp';
-import { radius, spacing, typography } from '@shared/theme';
+import { radius, spacing, typography, type AppColors } from '@shared/theme';
 import { useTheme } from '@shared/theme/ThemeContext';
 import { AppLogo } from '@shared/ui/AppLogo';
 import { AppText } from '@shared/ui/AppText';
@@ -26,7 +26,8 @@ const { height: SCREEN_H } = Dimensions.get('window');
 const STADIUM_BG = require('../../assets/images/login-screen.png') as number;
 
 export default function LoginScreen(): React.ReactNode {
-  const { isDark } = useTheme();
+  const { colors, isDark } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const router = useRouter();
   const { loading, error, requestOtp } = useOtp();
   const [phone, setPhone] = useState('');
@@ -79,7 +80,7 @@ export default function LoginScreen(): React.ReactNode {
             {/* Get Started text — directly on bg */}
             <AppText
               variant="heading"
-              color="#FFFFFF"
+              color={colors.onPhoto}
               style={{ marginBottom: spacing.xs }}
             >
               Get Started
@@ -95,7 +96,7 @@ export default function LoginScreen(): React.ReactNode {
             {/* Phone input — dark glass style */}
             <View style={styles.phoneRow}>
               <View style={[styles.prefix, { backgroundColor: inputBg, borderColor: inputBorder }]}>
-                <AppText variant="label" color="#FFFFFF">+91</AppText>
+                <AppText variant="label" color={colors.onPhoto}>+91</AppText>
               </View>
               <TextInput
                 style={[
@@ -143,7 +144,7 @@ export default function LoginScreen(): React.ReactNode {
                 end={{ x: 1, y: 0 }}
                 style={styles.ctaGradient}
               >
-                <AppText variant="label" color="#FFFFFF" style={{ fontSize: 17 }}>
+                <AppText variant="label" color={colors.onPhoto} style={{ fontSize: 17 }}>
                   {loading ? 'Sending code…' : 'Send OTP  →'}
                 </AppText>
               </LinearGradient>
@@ -169,7 +170,8 @@ export default function LoginScreen(): React.ReactNode {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: AppColors) =>
+  StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#050C19' },
   bg: { flex: 1, minHeight: SCREEN_H },
   kav: { flex: 1 },
@@ -196,7 +198,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     paddingHorizontal: spacing.md,
     fontSize: typography.body.fontSize,
-    color: '#FFFFFF',
+    color: colors.onPhoto,
   },
   ctaOuter: {
     borderRadius: 50,

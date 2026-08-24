@@ -1,19 +1,15 @@
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import { ActivityIndicator, FlatList, StyleSheet, View } from 'react-native';
 import { Stack } from 'expo-router';
 
 import { useUsers } from '@features/admin/presentation/useModeration';
 import type { AdminUser } from '@features/admin/data/adminRepository';
-import type { Sport } from '@shared/types/database.types';
-import { colors, radius, spacing } from '@shared/theme';
+import { useSportLabel } from '@features/sports/presentation/useSports';
+import { radius, spacing, type AppColors } from '@shared/theme';
+import { useTheme } from '@shared/theme/ThemeContext';
 import { AppText } from '@shared/ui/AppText';
 import { Button } from '@shared/ui/Button';
 import { Screen } from '@shared/ui/Screen';
-
-const SPORT_LABEL: Record<Sport, string> = {
-  box_cricket: 'Box Cricket',
-  badminton: 'Badminton',
-};
 
 function formatJoined(iso: string): string {
   const d = new Date(iso);
@@ -27,10 +23,13 @@ function formatJoined(iso: string): string {
  * profiles_admin_select RLS policy — a non-superadmin gets an empty list, not this screen.
  */
 export default function AdminUsersScreen(): React.ReactNode {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const { data: users, isLoading, isError, refetch, isRefetching } = useUsers();
+  const sportLabel = useSportLabel();
 
   const renderItem = useCallback(({ item }: { item: AdminUser }) => {
-    const sports = (item.sport_pref ?? []).map((s) => SPORT_LABEL[s]).join(', ');
+    const sports = (item.sport_pref ?? []).map((s) => sportLabel(s)).join(', ');
     return (
       <View style={styles.card}>
         <View style={styles.rowTop}>
@@ -61,7 +60,7 @@ export default function AdminUsersScreen(): React.ReactNode {
         </AppText>
       </View>
     );
-  }, []);
+  }, [colors, styles, sportLabel]);
 
   return (
     <Screen>
@@ -99,21 +98,22 @@ export default function AdminUsersScreen(): React.ReactNode {
   );
 }
 
-const styles = StyleSheet.create({
-  center: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.md,
-    paddingTop: spacing.xxl,
-  },
-  card: {
-    gap: spacing.xs,
-    padding: spacing.md,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
-  },
-  rowTop: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-});
+const makeStyles = (colors: AppColors) =>
+  StyleSheet.create({
+    center: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: spacing.md,
+      paddingTop: spacing.xxl,
+    },
+    card: {
+      gap: spacing.xs,
+      padding: spacing.md,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+    },
+    rowTop: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  });

@@ -1,10 +1,11 @@
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import { ActivityIndicator, FlatList, StyleSheet, View } from 'react-native';
 import { Stack } from 'expo-router';
 
 import { useReports, useModeration } from '@features/admin/presentation/useModeration';
 import type { Report } from '@features/admin/data/adminRepository';
-import { colors, radius, spacing } from '@shared/theme';
+import { radius, spacing, type AppColors } from '@shared/theme';
+import { useTheme } from '@shared/theme/ThemeContext';
 import { AppText } from '@shared/ui/AppText';
 import { Button } from '@shared/ui/Button';
 import { Screen } from '@shared/ui/Screen';
@@ -14,6 +15,8 @@ import { Screen } from '@shared/ui/Screen';
  * deactivate the reported user. All actions are RLS-authorised server-side.
  */
 export default function AdminReportsScreen(): React.ReactNode {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const { data: reports, isLoading, isError, refetch, isRefetching } = useReports('open');
   const { resolveReport, deactivateUser } = useModeration();
 
@@ -55,7 +58,7 @@ export default function AdminReportsScreen(): React.ReactNode {
         </View>
       );
     },
-    [resolveReport, deactivateUser],
+    [resolveReport, deactivateUser, styles],
   );
 
   return (
@@ -89,16 +92,17 @@ export default function AdminReportsScreen(): React.ReactNode {
   );
 }
 
-const styles = StyleSheet.create({
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.md, paddingTop: spacing.xxl },
-  card: {
-    gap: spacing.xs,
-    padding: spacing.md,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
-  },
-  actions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm },
-  actionBtn: { flex: 1 },
-});
+const makeStyles = (colors: AppColors) =>
+  StyleSheet.create({
+    center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.md, paddingTop: spacing.xxl },
+    card: {
+      gap: spacing.xs,
+      padding: spacing.md,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+    },
+    actions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm },
+    actionBtn: { flex: 1 },
+  });

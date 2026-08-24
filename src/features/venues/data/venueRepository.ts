@@ -23,7 +23,8 @@ export const venueRepository = {
     const { data, error } = await supabase
       .from('venues')
       .select('*')
-      .order('name', { ascending: true });
+      .order('name', { ascending: true })
+      .limit(100);
     if (error) throw toAppError(error);
     return data ?? [];
   },

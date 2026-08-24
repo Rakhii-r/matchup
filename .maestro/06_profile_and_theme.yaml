@@ -1,0 +1,37 @@
+appId: com.asrdigi.matchup
+---
+# Flow 6: Player Profile & Appearance Switch Flow
+- launchApp
+
+# 1. Navigate to Profile Tab
+- tapOn: "Profile"
+- assertVisible: "Overview"
+- assertVisible: "Recent"
+
+# 2. Verify Career Figures
+- assertVisible: "Matches"
+- assertVisible: "Wins"
+- assertVisible: "Win Rate"
+- assertVisible: "POTM"
+
+# 3. Switch Tabs
+- tapOn: "Recent"
+- assertVisible: ".*Recent Matches.*|.*No completed matches yet.*"
+
+- tapOn: "Overview"
+- assertVisible: "Performance"
+- assertVisible: "Matches Won"
+
+# 4. Scroll to Settings & Test Appearance Toggle
+- scroll
+- assertVisible: "ACCOUNT SETTINGS"
+- assertVisible: "Appearance"
+
+# Toggle theme
+- tapOn: "Appearance"
+- assertVisible: "Appearance"
+
+# 5. Verify Settings Items
+- assertVisible: "Edit Profile"
+- assertVisible: "Sport Preferences"
+- assertVisible: "Log Out"

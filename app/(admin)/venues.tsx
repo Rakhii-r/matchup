@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, View } from 'react-native';
 import { Stack } from 'expo-router';
 
@@ -9,10 +9,12 @@ import {
   useUpdateVenue,
   useVenues,
 } from '@features/venues/presentation/useVenues';
-import { SPORT_LABEL, VenueSchema } from '@features/venues/domain/venueSchema';
+import { VenueSchema } from '@features/venues/domain/venueSchema';
 import type { Venue } from '@features/venues/domain/venueSchema';
+import { useSportLabel } from '@features/sports/presentation/useSports';
 import type { Sport } from '@shared/types/database.types';
-import { colors, radius, spacing } from '@shared/theme';
+import { radius, spacing, type AppColors } from '@shared/theme';
+import { useTheme } from '@shared/theme/ThemeContext';
 import { AppText } from '@shared/ui/AppText';
 import { Button } from '@shared/ui/Button';
 import { Screen } from '@shared/ui/Screen';
@@ -21,10 +23,13 @@ import { TextField } from '@shared/ui/TextField';
 const SPORTS: Sport[] = ['badminton', 'box_cricket'];
 
 export default function ManageVenuesScreen(): React.ReactNode {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const venues = useVenues();
   const createVenue = useCreateVenue();
   const updateVenue = useUpdateVenue();
   const deleteVenue = useDeleteVenue();
+  const sportLabel = useSportLabel();
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [name, setName] = useState('');
@@ -145,7 +150,7 @@ export default function ManageVenuesScreen(): React.ReactNode {
                 variant="caption"
                 color={sports.includes(s) ? colors.textInverse : colors.text}
               >
-                {SPORT_LABEL[s]}
+                {sportLabel(s)}
               </AppText>
             </Pressable>
           ))}
@@ -200,34 +205,35 @@ export default function ManageVenuesScreen(): React.ReactNode {
   );
 }
 
-const styles = StyleSheet.create({
-  card: {
-    gap: spacing.sm,
-    padding: spacing.md,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
-    marginBottom: spacing.lg,
-  },
-  row: { flexDirection: 'row', gap: spacing.md },
-  rowItem: { flex: 1 },
-  chips: { flexDirection: 'row', gap: spacing.sm },
-  chip: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    borderRadius: radius.pill,
-    borderWidth: 1.5,
-    borderColor: colors.primary,
-    backgroundColor: colors.background,
-  },
-  chipOn: { backgroundColor: colors.primary },
-  listRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  rowActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.lg },
-});
+const makeStyles = (colors: AppColors) =>
+  StyleSheet.create({
+    card: {
+      gap: spacing.sm,
+      padding: spacing.md,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      marginBottom: spacing.lg,
+    },
+    row: { flexDirection: 'row', gap: spacing.md },
+    rowItem: { flex: 1 },
+    chips: { flexDirection: 'row', gap: spacing.sm },
+    chip: {
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.xs,
+      borderRadius: radius.pill,
+      borderWidth: 1.5,
+      borderColor: colors.primary,
+      backgroundColor: colors.background,
+    },
+    chipOn: { backgroundColor: colors.primary },
+    listRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: spacing.sm,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+    },
+    rowActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.lg },
+  });

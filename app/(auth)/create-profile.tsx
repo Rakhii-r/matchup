@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { ActivityIndicator, Image, ImageBackground, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -8,10 +8,11 @@ import { useRouter } from 'expo-router';
 import { authRepository } from '@features/auth/data/authRepository';
 import { getCurrentCoords } from '@core/location/location';
 import { useCreateProfile } from '@features/profile/presentation/useCreateProfile';
-import { M, R, S } from '@shared/theme/mockTheme';
+import { R, S, useMock, type MockPalette } from '@shared/theme/mockTheme';
 import { AppLogo } from '@shared/ui/AppLogo';
 import { AppText } from '@shared/ui/AppText';
 import { IconBadminton, IconClose, IconCricket, IconPlus, IconUser } from '@shared/ui/icons';
+import { SPORT_IMAGE } from '@shared/ui/sportImages';
 import type { Sport } from '@shared/types/database.types';
 
 type SportKey = 'cricket' | 'badminton';
@@ -24,10 +25,9 @@ const SPORTS: {
   colors: [string, string];
   img: number;
 }[] = [
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  { key: 'cricket', label: 'Cricket', Icon: IconCricket, colors: ['rgba(62,107,35,0.45)', 'rgba(11,20,7,0.85)'], img: require('../../assets/images/cricket.jpg') as number },
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  { key: 'badminton', label: 'Badminton', Icon: IconBadminton, colors: ['rgba(28,79,115,0.45)', 'rgba(6,17,26,0.85)'], img: require('../../assets/images/badminton.jpg') as number },
+  // 'cricket' is the picker's key; the photo lives under the DB key 'box_cricket'.
+  { key: 'cricket', label: 'Cricket', Icon: IconCricket, colors: ['rgba(62,107,35,0.45)', 'rgba(11,20,7,0.85)'], img: SPORT_IMAGE.box_cricket },
+  { key: 'badminton', label: 'Badminton', Icon: IconBadminton, colors: ['rgba(28,79,115,0.45)', 'rgba(6,17,26,0.85)'], img: SPORT_IMAGE.badminton },
 ];
 const SKILLS: Skill[] = ['Beginner', 'Intermediate', 'Advanced'];
 
@@ -38,6 +38,8 @@ const SPORT_KEY_TO_DB: Record<SportKey, Sport> = {
 };
 
 export default function CreateProfileScreen(): React.ReactNode {
+  const M = useMock();
+  const styles = useMemo(() => makeStyles(M), [M]);
   const router = useRouter();
   const { loading, error, submit } = useCreateProfile();
   const [name, setName] = useState('');
@@ -219,7 +221,7 @@ export default function CreateProfileScreen(): React.ReactNode {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (M: MockPalette) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: M.bg },
   header: {
     flexDirection: 'row',
