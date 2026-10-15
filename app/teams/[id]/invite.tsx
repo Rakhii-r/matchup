@@ -36,21 +36,22 @@ export default function InvitePlayers(): React.ReactNode {
       </Screen>
     );
   }
-  const text = `Join ${t.name} on SIXFOUR 24\n${sportLabel(t.sport)}\n\nTeam invite code: ${t.invite_code}\nOpen Teams → Join with code.`;
-  const share = () => Linking.openURL(`https://wa.me/?text=${encodeURIComponent(text)}`).catch(() => Alert.alert('Share this code', t.invite_code));
+  const inviteCode = t.invite_code ?? '';
+  const text = `Join ${t.name} on SIXFOUR 24\n${sportLabel(t.sport)}\n\nTeam invite code: ${inviteCode}\nOpen Teams → Join with code.`;
+  const share = () => Linking.openURL(`https://wa.me/?text=${encodeURIComponent(text)}`).catch(() => Alert.alert('Share this code', inviteCode));
   return (
     <Screen>
       <Stack.Screen options={{ title: 'Invite players' }} />
       <View style={styles.card}>
         <AppText muted center>Team invite code</AppText>
-        <Pressable onPress={() => void Clipboard.setStringAsync(t.invite_code)}>
-          <AppText variant="title" center>{t.invite_code}</AppText>
+        <Pressable onPress={() => void Clipboard.setStringAsync(inviteCode)}>
+          <AppText variant="title" center>{inviteCode || '—'}</AppText>
         </Pressable>
         <AppText muted center>Share this code with players to join {t.name}.</AppText>
       </View>
-      <Button label="Share via WhatsApp" onPress={share} />
+      <Button label="Share via WhatsApp" onPress={share} disabled={!inviteCode} />
       <View style={{ marginTop: spacing.sm }}>
-        <Button label="Copy invite code" variant="secondary" onPress={() => void Clipboard.setStringAsync(t.invite_code)} />
+        <Button label="Copy invite code" variant="secondary" onPress={() => void Clipboard.setStringAsync(inviteCode)} disabled={!inviteCode} />
       </View>
     </Screen>
   );

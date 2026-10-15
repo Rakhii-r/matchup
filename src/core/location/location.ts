@@ -1,3 +1,4 @@
+import { Alert } from 'react-native';
 import * as Location from 'expo-location';
 
 import { logger } from '@core/logging/logger';
@@ -8,14 +9,46 @@ export interface Coords {
 }
 
 /**
- * Best-effort device location for stamping a match's coordinates. Requests foreground
- * permission once; returns null (never throws) if permission is denied or the lookup
- * fails, so callers can fall back to the user's saved home area.
+ * Prominent In-App Disclosure for Google Play compliance.
+ * Must be presented BEFORE invoking the OS permission request dialog.
+ */
+async function showLocationDisclosure(): Promise<boolean> {
+  return new Promise((resolve) => {
+    Alert.alert(
+      'Location Access',
+      'SIXFOUR 24 uses your location to find nearby box cricket venues, match opponents on the radar, and show local open games. Your location is used solely for gameplay and venue discovery and is never shared for advertising.',
+      [
+        {
+          text: 'Not Now',
+          style: 'cancel',
+          onPress: () => resolve(false),
+        },
+        {
+          text: 'Continue',
+          onPress: () => resolve(true),
+        },
+      ],
+      { cancelable: false }
+    );
+  });
+}
+
+/**
+ * Best-effort device location for stamping a match's coordinates.
+ * Prominently discloses location use before requesting foreground permission.
+ * Returns null (never throws) if permission is denied or lookup fails.
  */
 export async function getCurrentCoords(): Promise<Coords | null> {
   try {
-    const { status } = await Location.requestForegroundPermissionsAsync();
-    if (status !== Location.PermissionStatus.GRANTED) return null;
+    const existing = await Location.getForegroundPermissionsAsync();
+    if (existing.status !== Location.PermissionStatus.GRANTED) {
+      if (existing.canAskAgain) {
+        const accepted = await showLocationDisclosure();
+        if (!accepted) return null;
+      }
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== Location.PermissionStatus.GRANTED) return null;
+    }
     const position = await Location.getCurrentPositionAsync({
       accuracy: Location.Accuracy.Balanced,
     });

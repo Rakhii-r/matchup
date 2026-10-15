@@ -65,19 +65,62 @@ export function useCreateTeam() {
   const userId = useAuthStore((s) => s.session?.user.id);
 
   return useMutation({
-    mutationFn: (form: CreateTeamForm): Promise<Team> => {
+    mutationFn: async (form: CreateTeamForm & { logoBase64?: string | null }): Promise<Team> => {
       if (!userId) throw new AppError('unauthorized', 'Please sign in again.');
-      return teamRepository.create({ name: form.name, sport: form.sport, ownerId: userId });
+      const team = await teamRepository.create({
+        name: form.name,
+        sport: form.sport,
+        ownerId: userId,
+        description: form.description,
+      });
+      if (form.logoBase64) {
+        try {
+          const url = await teamRepository.uploadLogo(team.id, form.logoBase64);
+          team.logo_url = url;
+        } catch (logoErr) {
+          // If logo upload fails due to network/storage, we log and still return created team
+          console.warn('Could not upload team logo during creation', logoErr);
+        }
+      }
+      return team;
     },
-    onSuccess: () => {
+    onSuccess: (team) => {
       void qc.invalidateQueries({ queryKey: teamsKey(userId) });
+      void qc.invalidateQueries({ queryKey: ['teams'] });
+      if (team?.id) {
+        void qc.invalidateQueries({ queryKey: teamKey(team.id) });
+        void qc.invalidateQueries({ queryKey: overviewKey(team.id) });
+      }
     },
   });
 }
 
 export function useUploadTeamLogo(teamId: string) {
   const qc = useQueryClient();
-  return useMutation({ mutationFn: (base64: string) => teamRepository.uploadLogo(teamId, base64), onSuccess: () => { void qc.invalidateQueries({ queryKey: teamKey(teamId) }); void qc.invalidateQueries({ queryKey: overviewKey(teamId) }); } });
+  const userId = useAuthStore((s) => s.session?.user.id);
+  return useMutation({
+    mutationFn: (base64: string) => teamRepository.uploadLogo(teamId, base64),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: teamKey(teamId) });
+      void qc.invalidateQueries({ queryKey: overviewKey(teamId) });
+      void qc.invalidateQueries({ queryKey: teamsKey(userId) });
+      void qc.invalidateQueries({ queryKey: ['teams'] });
+    },
+  });
+}
+
+export function useRemoveTeamLogo(teamId: string) {
+  const qc = useQueryClient();
+  const userId = useAuthStore((s) => s.session?.user.id);
+  return useMutation({
+    mutationFn: () => teamRepository.removeLogo(teamId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: teamKey(teamId) });
+      void qc.invalidateQueries({ queryKey: overviewKey(teamId) });
+      void qc.invalidateQueries({ queryKey: teamsKey(userId) });
+      void qc.invalidateQueries({ queryKey: ['teams'] });
+    },
+  });
 }
 
 export function useJoinTeamByCode() {
@@ -118,8 +161,10 @@ export function useDeleteTeam() {
 
   return useMutation({
     mutationFn: (teamId: string) => teamRepository.remove(teamId),
-    onSuccess: () => {
+    onSuccess: (_, teamId) => {
       void qc.invalidateQueries({ queryKey: teamsKey(userId) });
+      void qc.invalidateQueries({ queryKey: ['teams'] });
+      void qc.invalidateQueries({ queryKey: teamKey(teamId) });
     },
   });
 }
@@ -133,10 +178,13 @@ export function useDeleteTeam() {
  */
 export function useUpdateTeam(teamId: string) {
   const qc = useQueryClient();
-  return useMutation({ mutationFn: (input: { name: string; description: string; homeGround: string }) => teamRepository.update(teamId, input), onSuccess: () => { void qc.invalidateQueries({ queryKey: teamKey(teamId) }); void qc.invalidateQueries({ queryKey: ['teams'] }); } });
+  return useMutation({
+    mutationFn: (input: { name: string; description: string; homeGround: string }) =>
+      teamRepository.update(teamId, input),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: teamKey(teamId) });
+      void qc.invalidateQueries({ queryKey: ['teams'] });
+    },
+  });
 }
 
-export function useSetMemberRole(teamId: string) {
-  const qc = useQueryClient();
-  return useMutation({ mutationFn: (input: { userId: string; role: 'member' | 'vice_captain' }) => teamRepository.setMemberRole(teamId, input.userId, input.role), onSuccess: () => void qc.invalidateQueries({ queryKey: teamKey(teamId) }) });
-}

@@ -7,19 +7,17 @@
  * CHALLENGE_ALREADY_TAKEN, which is shown as information and the list refreshed.
  *
  * OUTGOING (`?challengeId=…`). The teams MY posted fixture was offered to,
- * which is where the radar's "View Match Offers" lands. These rows come from
+ * which is where the radar's "View Game Offers" lands. These rows come from
  * `get_challenge_candidates`, not from the table: `teams` is members-only, so a
  * plain select can only ever give the poster a uuid for a team they are not in.
  * That RPC is the only place the poster can read a candidate's name, squad size
  * and record.
  *
- * ACCEPTING ON THE OUTGOING SIDE. `accept_open_challenge` checks
- * `teams.owner_id = auth.uid()` for the ACCEPTING team — NOT for the poster.
- * A user who owns two squads can therefore legitimately take their own
- * fixture on the other squad's behalf, which is why `get_challenge_candidates`
- * returns `i_own_team` per row. Accept/Reject are shown on exactly those rows
- * and nowhere else; on every other candidate the button would always fail, so
- * the card keeps the "only their captain can take the fixture" line instead.
+ * ACCEPTING ON THE OUTGOING SIDE. The poster can accept any candidate that has
+ * applied (status 'interested'); `accept_open_challenge` then checks ownership
+ * itself and resolves whose squad the supplied lineup belongs to. A user who
+ * owns two squads can still take their own fixture with the other one — it
+ * reaches this list as an 'interested' applicant like any other.
  *
  * VIEW DETAILS runs NO query. `/teams/[id]` is gated on `is_team_member`, and
  * the poster is by definition not a member of a team they are matched against,
@@ -45,6 +43,7 @@ import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { AppError } from '@core/errors/AppError';
 import {
   useAcceptOpenChallenge,
+  useChallenge,
   useApplyToChallenge,
   useChallengeCandidatesFull,
   useDeclineOpenChallenge,
@@ -57,8 +56,12 @@ import type {
   OpenOffer,
 } from '@features/teams/domain/challengeSchema';
 import { R, S, useMock, type MockPalette } from '@shared/theme/mockTheme';
+import { useAuthStore } from '@core/auth/authStore';
+import { LineupPickerSheet } from '@features/matches/presentation/LineupPickerSheet';
+import { useSheetInsets } from '@shared/theme/responsive';
 import { AppText } from '@shared/ui/AppText';
 import { IconClose, IconUsers } from '@shared/ui/icons';
+import { PressableScale } from '@shared/ui/PressableScale';
 
 /** Smallest comfortable tap target, same figure as the create-match wizard. */
 const TOUCH = 44;
@@ -82,13 +85,13 @@ function formatDistance(metres: number): string {
 
 /** "12 played · 7 won · 58%" — or an honest line when nothing has been played. */
 function formatRecord(matchesPlayed: number, wins: number, winRate: number): string {
-  if (matchesPlayed <= 0) return 'No matches played yet';
+  if (matchesPlayed <= 0) return 'No games played yet';
   return `${matchesPlayed} played · ${wins} won · ${winRate}% win rate`;
 }
 
 const CANDIDATE_STATUS_LABEL: Record<string, string> = {
   offered: 'Scanned on Radar',
-  interested: '⚡ Requested Match (Wants to Play)',
+  interested: '⚡ Requested Game (Wants to Play)',
   accepted: 'Accepted',
   declined: 'Declined',
   expired: 'Expired',
@@ -191,6 +194,9 @@ function CandidateSheet({
   styles: ReturnType<typeof makeStyles>;
   M: MockPalette;
 }): React.ReactNode {
+  // Clears the home indicator / gesture bar, and stops a tall candidate
+  // card running off the top of a small screen.
+  const sheetInsets = useSheetInsets();
   return (
     <Modal
       transparent
@@ -205,7 +211,7 @@ function CandidateSheet({
         accessibilityLabel="Close team details"
       />
       {candidate ? (
-        <View style={styles.sheet}>
+        <View style={[styles.sheet, sheetInsets]}>
           <View style={styles.sheetHead}>
             <AppText variant="heading" color={M.text}>
               Team details
@@ -256,7 +262,7 @@ function CandidateSheet({
           {/* A row of zeroes reads as a broken screen, so say it plainly. */}
           {candidate.matches_played === 0 ? (
             <AppText variant="body" color={M.muted} style={styles.sheetEmpty}>
-              No matches played yet
+              No games played yet
             </AppText>
           ) : (
             <View style={styles.statRow}>
@@ -309,6 +315,9 @@ export default function OffersScreen(): React.ReactNode {
   // The poster's own candidate list keeps polling here for the same reason it
   // does on the radar: a team can accept while this screen is open.
   const candidates = useChallengeCandidatesFull(challengeId);
+  // total_slots is the only place the fixture's format lives.
+  const challenge = useChallenge(challengeId);
+  const myUserId = useAuthStore((st) => st.profile?.id ?? null);
   const myTeams = useMyTeamsOverview();
   const accept = useAcceptOpenChallenge();
   const applyToChallenge = useApplyToChallenge();
@@ -325,6 +334,8 @@ export default function OffersScreen(): React.ReactNode {
   } | null>(null);
   /** The row the detail sheet is showing. Held, not fetched. */
   const [detail, setDetail] = useState<ChallengeCandidateFull | null>(null);
+  /** The candidate being accepted, held until its captain has named a squad. */
+  const [pendingAccept, setPendingAccept] = useState<ChallengeCandidateFull | null>(null);
 
   const outgoing = challengeId !== null;
   const candidateBusy = accept.isPending || decline.isPending || applyToChallenge.isPending;
@@ -336,16 +347,84 @@ export default function OffersScreen(): React.ReactNode {
     return map;
   }, [myTeams.data]);
 
-  /** Filter out any teams the user owns or belongs to from candidate offers. */
+  /*
+    WHOSE squad the picker names — mirrors accept_open_challenge exactly.
+
+    On this list the caller is the poster, so the RPC seats the lineup against
+    `from_team_id`, their OWN team — not the applicant, whose roster the host
+    cannot even read (team_members is members-only, so the picker would render
+    an empty list they could never satisfy).
+
+    The one exception is the applicant being a second squad the caller owns:
+    there the RPC's applicant-owner branch wins, and so does this. Getting the
+    two out of step is how a captain picks one roster and the server seats
+    another.
+  */
+  const lineupTeam = useMemo(() => {
+    if (!pendingAccept) return null;
+    const mine = myTeamById.get(pendingAccept.team_id);
+    if (mine?.i_am_owner) return { id: mine.id, name: mine.name };
+    const hostTeamId = challenge.data?.from_team_id ?? null;
+    const host = hostTeamId ? myTeamById.get(hostTeamId) : null;
+    return host ? { id: host.id, name: host.name } : null;
+  }, [pendingAccept, myTeamById, challenge.data?.from_team_id]);
+
+  /**
+   * Filter out any teams the user owns or belongs to from candidate offers.
+   *
+   * `myTeamById` is the whole test: it is built from `get_my_teams_overview`,
+   * which returns every team the user belongs to, owned or not. The
+   * `!item.i_own_team` clause that used to sit beside it was both redundant and
+   * inert — see renderCandidate.
+   */
   const filteredCandidates = useMemo(() => {
-    return (candidates.data ?? []).filter(
-      (item) => !myTeamById.has(item.team_id) && !item.i_own_team,
-    );
+    return (candidates.data ?? []).filter((item) => !myTeamById.has(item.team_id));
   }, [candidates.data, myTeamById]);
+
+  /** Deduplicate incoming offers by challenge_id so the user sees at most ONE card per fixture. */
+  const dedupedIncomingOffers = useMemo(() => {
+    const raw = offers.data ?? [];
+    const map = new Map<string, OpenOffer>();
+    for (const item of raw) {
+      if (!item.challenge_id) continue;
+      if (!item.challenge || item.challenge.status !== 'open') continue;
+      const existing = map.get(item.challenge_id);
+      if (!existing) {
+        map.set(item.challenge_id, item);
+      } else if (existing.status !== 'interested' && item.status === 'interested') {
+        map.set(item.challenge_id, item);
+      }
+    }
+    return Array.from(map.values());
+  }, [offers.data]);
 
   const onSendRequest = useCallback(
     (offer: OpenOffer) => {
       if (!offer.challenge) return;
+
+      /*
+        Last client-side gate before apply_to_open_challenge.
+
+        The RPC and the challenge_candidates trigger both refuse a cross-format
+        request, so this changes no outcome — it changes the message. "Teams can
+        only play the same format" is actionable; a generic failure alert after a
+        round trip is not. The offer row itself carries the fixture's format, and
+        the team's comes from the same read model the card renders.
+      */
+      const fixtureFormat = Math.max(Math.floor(offer.challenge.total_slots / 2), 1);
+      const myTeam = myTeamById.get(offer.team_id);
+      if (myTeam && myTeam.target_size !== fixtureFormat) {
+        Alert.alert(
+          `${fixtureFormat} v ${fixtureFormat} only`,
+          `This fixture is ${fixtureFormat} v ${fixtureFormat}. ${myTeam.name} plays ${
+            myTeam.target_size !== null
+              ? `${myTeam.target_size} v ${myTeam.target_size}`
+              : 'no declared format'
+          }, and teams can only play others of the same format.`,
+        );
+        return;
+      }
+
       setPendingId(offer.id);
       applyToChallenge.mutate(
         { challengeId: offer.challenge_id, teamId: offer.team_id },
@@ -354,38 +433,45 @@ export default function OffersScreen(): React.ReactNode {
             setPendingId(null);
             Alert.alert(
               'Request Sent! ⚡',
-              'Your match request was sent! The opponent team captain has been notified to accept.',
+              'Your game request was sent! The opponent team captain has been notified to accept.',
             );
             void offers.refetch();
           },
           onError: (error: unknown) => {
             setPendingId(null);
             const message =
-              error instanceof AppError ? error.message : 'Could not send the match request.';
-            Alert.alert('Match Request', message);
+              error instanceof AppError ? error.message : 'Could not send the game request.';
+            Alert.alert('Game Request', message);
             void offers.refetch();
           },
         },
       );
     },
-    [applyToChallenge, offers],
+    [applyToChallenge, offers, myTeamById],
   );
 
   /**
-   * Take my OWN other squad's offer. Only ever reachable from a row with
-   * `i_own_team` — `accept_open_challenge` checks the accepting team's owner,
-   * and NOT_TEAM_OWNER comes back as readable copy from the repository if the
-   * row ever lies.
+   * Accept an applicant. `accept_open_challenge` checks the accepting team's
+   * owner, and NOT_TEAM_OWNER comes back as readable copy from the repository
+   * if the row the list rendered is stale.
    */
-  const onAcceptCandidate = useCallback(
-    (item: ChallengeCandidateFull) => {
-      if (challengeId === null) return;
+  // Step one: name the squad. `accept_open_challenge` confirms the fixture and
+  // seats the lineup in one transaction, so both answers are collected first.
+  const onAcceptCandidate = useCallback((item: ChallengeCandidateFull) => {
+    setPendingAccept(item);
+  }, []);
+
+  const onConfirmLineup = useCallback(
+    (userIds: string[]) => {
+      const item = pendingAccept;
+      if (challengeId === null || !item) return;
       setCandidateAction({ id: item.candidate_id, kind: 'accept' });
       accept.mutate(
-        { challengeId, teamId: item.team_id },
+        { challengeId, teamId: item.team_id, lineup: userIds },
         {
           onSuccess: (challenge) => {
             setCandidateAction(null);
+            setPendingAccept(null);
             // The RPC calls finalise_challenge, so the row comes back with the
             // new match. Replace rather than push: going "back" to a candidate
             // list that is now settled is a dead end.
@@ -404,7 +490,7 @@ export default function OffersScreen(): React.ReactNode {
         },
       );
     },
-    [accept, candidates, challengeId, router],
+    [accept, candidates, challengeId, router, pendingAccept],
   );
 
   const onRejectCandidate = useCallback(
@@ -451,7 +537,7 @@ export default function OffersScreen(): React.ReactNode {
 
   const renderIncoming = useCallback(
     ({ item }: { item: OpenOffer }) => {
-      if (!item.challenge) return null;
+      if (!item.challenge || item.challenge.status !== 'open') return null;
       const busy = pendingId === item.id;
       const team = myTeamById.get(item.team_id);
       const isInterested = item.status === 'interested';
@@ -464,8 +550,11 @@ export default function OffersScreen(): React.ReactNode {
           <AppText variant="caption" color={M.muted}>
             {formatWhen(item.challenge.scheduled_at)}
           </AppText>
+          {/* The format, not the sheet total. It is the field that decides
+              whether this offer is even legal for the squad below, so it reads
+              as "4 v 4" rather than "8 players". */}
           <AppText variant="caption" color={M.muted}>
-            {formatDistance(item.distance_m)} · {item.challenge.total_slots} players
+            {`${formatDistance(item.distance_m)} · ${Math.max(Math.floor(item.challenge.total_slots / 2), 1)} v ${Math.max(Math.floor(item.challenge.total_slots / 2), 1)}`}
           </AppText>
 
           {team ? (
@@ -503,19 +592,42 @@ export default function OffersScreen(): React.ReactNode {
           {isInterested ? (
             <View style={{ paddingVertical: 4 }}>
               <AppText variant="caption" color={M.green} style={{ fontWeight: '700' }}>
-                ⚡ Match Request Sent · Waiting for opponent captain to accept
+                ⚡ Game Request Sent · Waiting for opponent captain to accept
               </AppText>
             </View>
           ) : null}
 
           <View style={styles.ctaRow}>
             <Pressable
-              onPress={() => router.push(`/teams/${item.team_id}`)}
+              onPress={() => {
+                router.push({
+                  pathname: '/chat/[id]',
+                  params: {
+                    // No `teamName`: this side only knows the GAME's name, and
+                    // a game is not who you are talking to. The chat screen
+                    // names the other captain itself.
+                    id: item.challenge_id,
+                    challengeId: item.challenge_id,
+                  },
+                });
+              }}
               style={[styles.btn, styles.btnGhost]}
               accessibilityRole="button"
             >
               <AppText variant="label" color={M.green}>
-                View Details
+                💬 Chat
+              </AppText>
+            </Pressable>
+            <Pressable
+              onPress={() => {
+                const targetTeamId = item.challenge?.from_team_id || item.team_id;
+                router.push(`/teams/${targetTeamId}`);
+              }}
+              style={[styles.btn, styles.btnGhost]}
+              accessibilityRole="button"
+            >
+              <AppText variant="label" color={M.green}>
+                Details
               </AppText>
             </Pressable>
             {!isInterested ? (
@@ -547,7 +659,7 @@ export default function OffersScreen(): React.ReactNode {
               Alert.alert(
                 isInterested ? 'Withdraw request?' : 'Decline offer?',
                 isInterested
-                  ? 'Your match request will be cancelled.'
+                  ? 'Your game request will be cancelled.'
                   : 'This offer will no longer be available to your team.',
                 [
                   { text: 'Cancel', style: 'cancel' },
@@ -592,8 +704,21 @@ export default function OffersScreen(): React.ReactNode {
 
   const renderCandidate = useCallback(
     ({ item }: { item: ChallengeCandidateFull }) => {
-      // The host can accept any interested applicant, or a captain can accept an offer for their squad
-      const canAct = (outgoing && item.status === 'interested') || (item.i_own_team && item.status === 'offered');
+      /*
+        The host can accept any interested applicant.
+
+        There used to be a second clause here — `item.i_own_team && status ===
+        'offered'` — for taking a fixture the radar offered to another squad you
+        own. It was dead twice over: `get_challenge_candidates` stopped
+        returning `i_own_team` in August, AND `rank_challenge_candidates`
+        excludes teams the poster owns, so such a row cannot exist. Removed
+        rather than repaired.
+
+        Accepting with a second squad you own is still possible — it just
+        arrives as 'interested', through apply_to_open_challenge, and is covered
+        by the clause below.
+      */
+      const canAct = outgoing && item.status === 'interested';
       const accepting =
         candidateAction?.id === item.candidate_id && candidateAction.kind === 'accept';
       const rejecting =
@@ -618,6 +743,26 @@ export default function OffersScreen(): React.ReactNode {
 
           <View style={styles.ctaRow}>
             <Pressable
+              onPress={() =>
+                router.push({
+                  pathname: '/chat/[id]',
+                  params: {
+                    id: challengeId ?? '',
+                    challengeId: challengeId ?? '',
+                    toTeamId: item.team_id,
+                    teamName: item.team_name,
+                  },
+                })
+              }
+              style={[styles.btn, styles.btnGhost]}
+              accessibilityRole="button"
+              accessibilityLabel={`Chat with ${item.team_name} captain`}
+            >
+              <AppText variant="label" color={M.green}>
+                💬 Chat
+              </AppText>
+            </Pressable>
+            <Pressable
               onPress={() => router.push(`/teams/${item.team_id}`)}
               style={[styles.btn, styles.btnGhost]}
               accessibilityRole="button"
@@ -641,7 +786,7 @@ export default function OffersScreen(): React.ReactNode {
 
           {canAct ? (
             <View style={styles.ctaRow}>
-              <Pressable
+              <PressableScale
                 onPress={() => onAcceptCandidate(item)}
                 disabled={candidateBusy}
                 accessibilityRole="button"
@@ -652,7 +797,7 @@ export default function OffersScreen(): React.ReactNode {
                 <AppText variant="label" color={M.limeInk}>
                   {outgoing ? '✓ Accept Request' : 'Accept Offer'}
                 </AppText>
-              </Pressable>
+              </PressableScale>
               <Pressable
                 onPress={() => onRejectCandidate(item)}
                 disabled={candidateBusy}
@@ -688,7 +833,7 @@ export default function OffersScreen(): React.ReactNode {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
-      <Stack.Screen options={{ title: 'Match offers' }} />
+      <Stack.Screen options={{ title: 'Game offers' }} />
 
       {isLoading ? (
         <View style={styles.centre}>
@@ -718,7 +863,7 @@ export default function OffersScreen(): React.ReactNode {
               <Pressable
                 onPress={() => {
                   if (challengeId) {
-                    router.push({
+                    router.replace({
                       pathname: '/match/create/searching',
                       params: { challengeId },
                     });
@@ -740,7 +885,7 @@ export default function OffersScreen(): React.ReactNode {
                 <AppText color={M.green}>›</AppText>
               </Pressable>
               <AppText variant="caption" color={M.muted}>
-                Teams your fixture was offered to. The first to accept gets the match.
+                Teams your fixture was offered to. The first to accept gets the game.
               </AppText>
             </View>
           }
@@ -758,8 +903,8 @@ export default function OffersScreen(): React.ReactNode {
         />
       ) : (
         <FlatList
-          data={offers.data ?? []}
-          keyExtractor={(item) => item.id}
+          data={dedupedIncomingOffers}
+          keyExtractor={(item) => item.challenge_id}
           renderItem={renderIncoming}
           refreshing={offers.isRefetching}
           onRefresh={() => void offers.refetch()}
@@ -779,6 +924,29 @@ export default function OffersScreen(): React.ReactNode {
 
       {/* Pure projection of the row already in memory — no query is issued. */}
       <CandidateSheet candidate={detail} onClose={closeDetail} styles={styles} M={M} />
+
+      {/*
+        Naming the squad of the team being accepted.
+
+        This list is the poster's, so the caller is usually the host and
+        `accept_open_challenge` seats the lineup against `from_team_id`. When
+        the applicant is a second squad the caller also owns, the RPC's
+        applicant-owner branch wins and seats it against that team instead —
+        which is the team this picker was opened for either way.
+      */}
+      {pendingAccept && myUserId && lineupTeam ? (
+        <LineupPickerSheet
+          visible
+          onClose={() => setPendingAccept(null)}
+          teamId={lineupTeam.id}
+          teamName={lineupTeam.name}
+          captainId={myUserId}
+          format={Math.max(Math.floor((challenge.data?.total_slots ?? 0) / 2), 1)}
+          busy={accept.isPending}
+          confirmLabel="Confirm fixture"
+          onConfirm={onConfirmLineup}
+        />
+      ) : null}
     </SafeAreaView>
   );
 }

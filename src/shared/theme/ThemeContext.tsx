@@ -50,11 +50,9 @@ export function ThemeProvider({ children }: { children: ReactNode }): ReactNode 
     }
   }, []);
 
-  // The app is a dark-only sixfour24 design, so default to dark regardless of the device
-  // setting; a manual override (if ever exposed) still wins. systemScheme is retained
-  // for that future toggle.
+  // Default to the clean emerald light design; a manual override or toggle still wins.
   void systemScheme;
-  const scheme: ColorScheme = override ?? 'dark';
+  const scheme: ColorScheme = override ?? 'light';
   const isDark = scheme === 'dark';
   const resolvedColors: AppColors = isDark ? darkColors : lightColors;
 

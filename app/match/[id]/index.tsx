@@ -1,13 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Linking, Pressable, StyleSheet, View } from 'react-native';
-import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
 
 import { useAuthStore } from '@core/auth/authStore';
+import { useMyTeamsOverview } from '@features/teams/presentation/useTeams';
 import { AppError } from '@core/errors/AppError';
+import { LineupPickerSheet } from '@features/matches/presentation/LineupPickerSheet';
+import { useSetMatchLineup } from '@features/matches/presentation/useLineup';
 import {
-  useAttendance,
-  useAttendanceActions,
   useJoinOpenMatch,
   useMatch,
   useMatchPlayers,
@@ -22,6 +23,7 @@ import {
 } from '@features/matches/presentation/useMatches';
 import type { PlayerWithProfile } from '@features/matches/data/matchRepository';
 import { PLAYER_STATUS_LABEL } from '@features/matches/domain/matchSchema';
+import { useSlotCountdown } from '@features/matches/presentation/useSlotCountdown';
 import { ReportBlockBar } from '@features/safety/presentation/ReportBlockBar';
 import { useSportLabel } from '@features/sports/presentation/useSports';
 import type { Match } from '@features/matches/domain/matchSchema';
@@ -66,6 +68,8 @@ const STATUS_COLOR = (colors: AppColors): Record<Match['status'], string> => ({
   locked: colors.warning,
   completed: colors.success,
   cancelled: colors.danger,
+  // Muted, not danger: nothing went wrong, the slot simply ran out.
+  expired: colors.textMuted,
 });
 
 export default function MatchDetailScreen(): React.ReactNode {
@@ -78,13 +82,13 @@ export default function MatchDetailScreen(): React.ReactNode {
 
   const match = useMatch(matchId);
   const players = useMatchPlayers(matchId);
+  const setLineup = useSetMatchLineup(matchId);
+  const [pickingLineup, setPickingLineup] = useState(false);
   const sides = useMatchSides(matchId);
   const membership = useMyMembership(matchId);
-  const attendance = useAttendance(matchId);
 
   const playerActions = usePlayerActions(matchId);
   const matchStatus = useMatchStatus(matchId);
-  const attendanceActions = useAttendanceActions(matchId);
   const requestToJoin = useRequestToJoin(matchId);
   const joinOpen = useJoinOpenMatch();
   const respondToInvite = useRespondToMatchInvite(matchId);
@@ -109,28 +113,64 @@ export default function MatchDetailScreen(): React.ReactNode {
     };
   }, []);
 
+  // A finished match belongs on the result screen.
+  //
+  // Two things matter here. It is an EFFECT, not a call in the render body:
+  // navigating while React is rendering re-enters this component mid-commit and
+  // then fires again on every render until it unmounts. And it is a FOCUS
+  // effect, because a native stack keeps this screen alive underneath the score
+  // and result screens — a plain effect firing from down there would replace
+  // whatever route is on top instead of this one. `replace` takes this screen
+  // out of the stack, so back from the result goes where it came from rather
+  // than bouncing off this redirect.
+  const isCompleted = match.data?.status === 'completed';
+  useFocusEffect(
+    useCallback(() => {
+      if (isCompleted) router.replace(`/match/${matchId}/result`);
+    }, [isCompleted, matchId, router]),
+  );
+
   const data = match.data;
   const isCreator = Boolean(data && userId && data.creator_id === userId);
+  const isCaptain = Boolean(
+    isCreator ||
+      membership.data?.role === 'creator' ||
+      (data?.team_b_id && membership.data?.status === 'confirmed'),
+  );
 
-  const now = new Date();
-  const endTime = data?.end_time ? new Date(data.end_time) : null;
-  const hasSlotTimeRemaining = Boolean(endTime && now < endTime);
+  /*
+    Who may open the captains' chat. NOT `isCaptain` above: that is true for any
+    confirmed player on a team fixture, while `send_captain_message` admits only
+    the OWNER of team A or team B. Offering the button on the looser rule sent
+    every other player to "Only the two team captains can use this chat."
+  */
+  const myTeams = useMyTeamsOverview();
+  const isTeamCaptain = (myTeams.data ?? []).some(
+    (t) => t.i_am_owner && (t.id === data?.team_a_id || t.id === data?.team_b_id),
+  );
+
+
+  /**
+   * The booked slot. Shared with the result and scoring screens rather than
+   * recomputed here — this screen used to keep its own copy, which recreated
+   * `new Date()` on every render (so its useMemo never memoised) and, worse,
+   * gated on `endTime && now < endTime`. A null `end_time` means the match has
+   * NO booked slot, not that the slot has run out, so that test hid "Start Next
+   * Match" on every one of the 19 matches created before the slot became
+   * mandatory — the exact gating `create_rematch` was changed to stop doing.
+   */
+  const slot = useSlotCountdown(data?.end_time);
+
   const canStartNextMatch = Boolean(
     data &&
     (isCreator || Boolean(membership.data)) &&
     data.status === 'completed' &&
-    hasSlotTimeRemaining
+    // Not `hasSlot && !expired`: no slot means no cut-off to be past.
+    !slot.expired &&
+    // create_rematch is organiser-only, so anyone else would only reach
+    // NOT_THE_ORGANISER by tapping. Was `isCreator || membership.data`.
+    isCreator
   );
-
-  const slotTimeRemainingFormatted = useMemo(() => {
-    if (!endTime || now >= endTime) return null;
-    const diffMs = endTime.getTime() - now.getTime();
-    const totalMins = Math.floor(diffMs / 60000);
-    const hrs = Math.floor(totalMins / 60);
-    const mins = totalMins % 60;
-    if (hrs > 0) return `${hrs}h ${mins}m`;
-    return `${mins}m`;
-  }, [endTime, now]);
 
   const onStartNextMatch = async (): Promise<void> => {
     setRematchError(null);
@@ -138,7 +178,7 @@ export default function MatchDetailScreen(): React.ReactNode {
       const newMatch = await rematch.mutateAsync(matchId);
       router.push(`/match/${newMatch.id}/toss`);
     } catch (e) {
-      setRematchError(e instanceof AppError ? e.message : 'Could not start next match.');
+      setRematchError(e instanceof AppError ? e.message : 'Could not start the next round.');
     }
   };
 
@@ -147,7 +187,7 @@ export default function MatchDetailScreen(): React.ReactNode {
     try {
       await requestToJoin.mutateAsync();
     } catch (e) {
-      setJoinError(e instanceof AppError ? e.message : 'Could not join that match.');
+      setJoinError(e instanceof AppError ? e.message : 'Could not join that game.');
     }
   };
 
@@ -162,7 +202,7 @@ export default function MatchDetailScreen(): React.ReactNode {
     try {
       await joinOpen.mutateAsync(matchId);
     } catch (e) {
-      setJoinError(e instanceof AppError ? e.message : 'Could not join that match.');
+      setJoinError(e instanceof AppError ? e.message : 'Could not join that game.');
     }
   };
 
@@ -182,7 +222,7 @@ export default function MatchDetailScreen(): React.ReactNode {
 
   const onDeclineInvite = (): void => {
     Alert.alert(
-      'Cannot play this match?',
+      'Cannot play this game?',
       'Your organiser will be told so they can find a replacement. You cannot undo this.',
       [
         { text: 'Back', style: 'cancel' },
@@ -195,25 +235,51 @@ export default function MatchDetailScreen(): React.ReactNode {
     );
   };
 
+  /**
+   * Start the match: lock the sheet, then go straight to the Match Center.
+   *
+   * Locking is what "started" means here (see the CTA below), and it is not
+   * reversible from the UI, so it asks first. Navigation hangs off the
+   * mutation's success rather than firing alongside it -- landing on the
+   * scoring console while the server is still refusing to start an innings on
+   * an open match is worse than a moment's wait on the button.
+   */
+  const onStartMatch = (): void => {
+    Alert.alert(
+      'Start the match?',
+      'Nobody else can join once the match starts, and the toss and scoring open up.',
+      [
+        { text: 'Not yet', style: 'cancel' },
+        {
+          text: 'Start match',
+          onPress: () =>
+            matchStatus.lock.mutate(undefined, {
+              onSuccess: () => router.push(`/match/${matchId}/live`),
+              onError: (e: unknown) =>
+                Alert.alert(
+                  'Could not start',
+                  e instanceof AppError ? e.message : 'Could not start the match.',
+                ),
+            }),
+        },
+      ],
+    );
+  };
+
   const onCancelMatch = (): void => {
     Alert.alert(
-      'Cancel this match?',
-      'Everyone who joined will lose their place and the match will stop showing to nearby players. This cannot be undone.',
+      'Cancel this game?',
+      'Everyone who joined will lose their place and the game will stop showing to nearby players. This cannot be undone.',
       [
-        { text: 'Keep match', style: 'cancel' },
+        { text: 'Keep game', style: 'cancel' },
         {
-          text: 'Cancel match',
+          text: 'Cancel game',
           style: 'destructive',
           onPress: () => matchStatus.cancel.mutate(),
         },
       ],
     );
   };
-
-  const attendedById = useMemo(
-    () => new Map((attendance.data ?? []).map((a) => [a.user_id, a.attended])),
-    [attendance.data],
-  );
 
   const confirmedCount = useMemo(
     () => (players.data ?? []).filter((p) => p.status === 'confirmed').length,
@@ -223,7 +289,7 @@ export default function MatchDetailScreen(): React.ReactNode {
   if (match.isLoading) {
     return (
       <Screen>
-        <Stack.Screen options={{ title: 'Match' }} />
+        <Stack.Screen options={{ title: 'Game' }} />
         <View style={styles.center}>
           <ActivityIndicator color={colors.primary} />
         </View>
@@ -234,18 +300,18 @@ export default function MatchDetailScreen(): React.ReactNode {
   if (match.isError || !data) {
     return (
       <Screen>
-        <Stack.Screen options={{ title: 'Match' }} />
+        <Stack.Screen options={{ title: 'Game' }} />
         <View style={styles.center}>
-          <AppText muted>This match could not be found.</AppText>
+          <AppText muted>This game could not be found.</AppText>
           <Button label="Retry" variant="secondary" onPress={() => void match.refetch()} />
         </View>
       </Screen>
     );
   }
 
-  // If match is already completed, redirect straight to the result & scorecard screen
+  // Already completed — the effect above is sending us to the result screen.
+  // This is just what is on screen for the frame or two until it lands.
   if (data.status === 'completed') {
-    router.replace(`/match/${matchId}/result`);
     return (
       <Screen>
         <Stack.Screen options={{ title: data.match_name }} />
@@ -270,9 +336,13 @@ export default function MatchDetailScreen(): React.ReactNode {
   const isFull = seatsLeft === 0;
 
   const canManage = data.status === 'open' || data.status === 'locked';
-  const canMarkAttendance = data.status === 'locked';
   const actionsBusy = playerActions.setStatus.isPending || playerActions.remove.isPending;
   const isCancelled = data.status === 'cancelled';
+  // Its time ran out and expire_stale_matches() closed it. Every action the
+  // screen gates on "cancelled" must gate on this too -- an expired game is
+  // just as over, and the server refuses joins, venue changes and toss on it.
+  const isExpired = data.status === 'expired';
+  const isOver = isCancelled || isExpired;
   // A stranger who arrived from the nearby feed or a shared link: not the
   // organiser, and not yet in the queue. This is the only state that offers the
   // join action — once they have a membership row the status card takes over.
@@ -286,7 +356,7 @@ export default function MatchDetailScreen(): React.ReactNode {
   // The open-match equivalent. Same "not me, not already in" test, but there is
   // no queue behind it — confirming takes the seat.
   const canJoinOpenMatch =
-    isOpenMatch && !isCreator && !membership.isLoading && !membership.data && !isCancelled;
+    isOpenMatch && !isCreator && !membership.isLoading && !membership.data && !isOver;
 
   const onCopyCode = (): void => {
     Clipboard.setStringAsync(data.share_code)
@@ -316,6 +386,24 @@ export default function MatchDetailScreen(): React.ReactNode {
   const roster = players.data ?? [];
   const sideA = roster.filter((p) => p.side === 'a');
   const sideB = roster.filter((p) => p.side === 'b');
+
+  /*
+    THE SQUAD THIS VIEWER STILL OWES.
+
+    Only ONE captain is present when a fixture is accepted, so only their squad
+    is named there; the other captain names theirs here. Their side has just
+    themselves on it until they do, which is why "1 of 4" is the trigger rather
+    than any flag — the seat count IS the state.
+  */
+  // The seat itself carries the team, so there is no need to infer it from the
+  // role — and a captain is the only person who can act on it anyway.
+  const myTeamId = isCaptain ? membership.data?.team_id ?? null : null;
+  const iAmHomeSide = Boolean(myTeamId) && myTeamId === data?.team_a_id;
+  const myTeamName = iAmHomeSide ? sides.data?.team_a_name : sides.data?.team_b_name;
+  const mySideCount = iAmHomeSide ? sideA.length : sideB.length;
+  const lineupFormat = Math.max(Math.floor((data?.total_slots ?? 0) / 2), 1);
+  const needsLineup =
+    Boolean(myTeamId) && !isOver && data?.match_type === 'team_vs_team' && mySideCount < lineupFormat;
   const unsided = roster.filter((p) => p.side === null);
   const isFixture = sideA.length > 0 || sideB.length > 0;
 
@@ -326,7 +414,6 @@ export default function MatchDetailScreen(): React.ReactNode {
 
   const renderPlayer = (p: PlayerWithProfile): React.ReactNode => {
     const name = p.profile?.full_name ?? 'Player';
-    const attended = attendedById.get(p.user_id);
     // Who this person is on the sheet. Only an open match writes a row for its
     // creator, so this badge is exactly the HOST / PLAYER distinction the flow
     // is built around; a team fixture keeps the queue status it always showed.
@@ -393,23 +480,6 @@ export default function MatchDetailScreen(): React.ReactNode {
           </View>
         ) : null}
 
-        {isCreator && canMarkAttendance && p.status === 'confirmed' ? (
-          <View style={styles.playerActions}>
-            <Button
-              label={attended === true ? 'Present ✓' : 'Present'}
-              variant={attended === true ? 'primary' : 'secondary'}
-              disabled={attendanceActions.mark.isPending}
-              onPress={() => attendanceActions.mark.mutate({ userId: p.user_id, attended: true })}
-            />
-            <Button
-              label={attended === false ? 'Absent ✓' : 'Absent'}
-              variant={attended === false ? 'danger' : 'secondary'}
-              disabled={attendanceActions.mark.isPending}
-              onPress={() => attendanceActions.mark.mutate({ userId: p.user_id, attended: false })}
-            />
-          </View>
-        ) : null}
-
         {/* Never offer to report or block yourself. */}
         {p.user_id !== userId ? (
           <ReportBlockBar targetUserId={p.user_id} matchId={data.id} />
@@ -422,15 +492,49 @@ export default function MatchDetailScreen(): React.ReactNode {
     <Screen scroll>
       <Stack.Screen options={{ title: data.match_name }} />
 
-      {isCancelled ? (
+      {isOver ? (
         <View style={styles.cancelledBanner}>
           <AppText variant="label" color={colors.textInverse}>
-            This match was cancelled
+            {isCancelled ? 'This game was cancelled' : 'This game is over'}
           </AppText>
           <AppText variant="caption" color={colors.textInverse}>
-            The organiser called it off. It no longer appears to nearby players.
+            {isCancelled
+              ? 'The organiser called it off. It no longer appears to nearby players.'
+              : 'Its time ran out before a result was recorded. It no longer appears to nearby players.'}
           </AppText>
         </View>
+      ) : null}
+
+      {data.challenge_id ? (
+        <Pressable
+          onPress={() =>
+            router.push({
+              pathname: '/match/create/searching',
+              params: { challengeId: data.challenge_id },
+            })
+          }
+          style={styles.radarBanner}
+          accessibilityRole="button"
+          accessibilityLabel="View Live Radar Scanner"
+        >
+          <View style={styles.radarPill}>
+            <View style={styles.radarDot} />
+            <AppText variant="caption" color="#000" style={{ fontWeight: '800', fontSize: 10 }}>
+              LIVE RADAR
+            </AppText>
+          </View>
+          <View style={{ flex: 1, gap: 2 }}>
+            <AppText variant="label" color="#FFFFFF" numberOfLines={1}>
+              Opponent Radar Active
+            </AppText>
+            <AppText variant="caption" color="rgba(255,255,255,0.7)">
+              Tap to open live radar and scan nearby teams
+            </AppText>
+          </View>
+          <AppText variant="label" color="#6cf8bb">
+            View →
+          </AppText>
+        </Pressable>
       ) : null}
 
       <View style={styles.card}>
@@ -457,7 +561,7 @@ export default function MatchDetailScreen(): React.ReactNode {
                 {seatsTaken} / {data.total_slots} Players
               </AppText>
               <AppText variant="caption" color={isFull ? colors.warning : colors.textMuted}>
-                {isFull ? 'MATCH FULL' : `${seatsLeft} ${seatsLeft === 1 ? 'spot' : 'spots'} left`}
+                {isFull ? 'GAME FULL' : `${seatsLeft} ${seatsLeft === 1 ? 'spot' : 'spots'} left`}
               </AppText>
             </View>
           </>
@@ -524,12 +628,12 @@ export default function MatchDetailScreen(): React.ReactNode {
       {canJoinOpenMatch ? (
         <View style={styles.card}>
           <AppText variant="label">
-            {isFull ? 'This match is full' : 'Join this match'}
+            {isFull ? 'This game is full' : 'Join this game'}
           </AppText>
           <AppText variant="caption" muted>
             {isFull
               ? `All ${data.total_slots} places have been taken.`
-              : 'You will join this match as an individual player. No team needed.'}
+              : 'You will join this game as an individual player. No team needed.'}
           </AppText>
           <AppText variant="caption" muted>
             {seatsTaken} / {data.total_slots} players
@@ -544,7 +648,7 @@ export default function MatchDetailScreen(): React.ReactNode {
           ) : null}
           {data.status !== 'open' && !isFull ? (
             <AppText variant="caption" muted>
-              This match is no longer taking players.
+              This game is no longer taking players.
             </AppText>
           ) : null}
           {joinError ? (
@@ -565,11 +669,11 @@ export default function MatchDetailScreen(): React.ReactNode {
         booked into a fixture. They have not agreed to anything yet, and they
         are not counted in filled_slots until they do.
       */}
-      {!isCreator && membership.data?.status === 'invited' && !isCancelled ? (
+      {!isCreator && membership.data?.status === 'invited' && !isOver ? (
         <View style={styles.card}>
           <AppText variant="label">Can you make it?</AppText>
           <AppText variant="caption" muted>
-            Your team was booked into this match. You are not counted until you confirm.
+            Your team was booked into this game. You are not counted until you confirm.
           </AppText>
           <Button
             label="Confirm I'm playing"
@@ -593,7 +697,7 @@ export default function MatchDetailScreen(): React.ReactNode {
       {!isCreator && membership.data ? (
         <View style={styles.card}>
           <AppText variant="label">
-            {isOpenMatch ? "You've joined this match" : 'Your status'}
+            {isOpenMatch ? "You've joined this game" : 'Your status'}
           </AppText>
           <AppText>
             {isOpenMatch
@@ -624,22 +728,27 @@ export default function MatchDetailScreen(): React.ReactNode {
       ) : null}
 
       {/*
-        Time left in slot — Play Again / Next Match card
+        Start the next game in this booked slot. Hidden once the slot has
+        passed; a match with no slot at all has no cut-off and keeps the card.
       */}
       {canStartNextMatch ? (
         <View style={styles.card}>
-          <AppText variant="label">Time left in your slot</AppText>
-          <AppText variant="caption" muted>
-            The slot runs until {data.end_time ? formatWhen(data.end_time).split(', ')[1] ?? formatWhen(data.end_time) : 'the booked end time'}. Start another match with the same players?
+          <AppText variant="label">
+            {slot.hasSlot ? 'Time left in your slot' : 'Play another round'}
           </AppText>
-          {slotTimeRemainingFormatted ? (
+          <AppText variant="caption" muted>
+            {slot.hasSlot
+              ? `The slot runs until ${slot.endsAtLabel}. Start another match with the same players?`
+              : 'This game has no booked end time, so nothing is counting down. Start another with the same players?'}
+          </AppText>
+          {slot.label ? (
             <AppText variant="caption" color={colors.accent}>
-              Time remaining: {slotTimeRemainingFormatted}
+              {slot.label}
             </AppText>
           ) : null}
           <View style={{ marginTop: spacing.sm }}>
             <Button
-              label="⚡ Start Next Match"
+              label="⚡ Start Next Round"
               loading={rematch.isPending}
               onPress={() => void onStartNextMatch()}
             />
@@ -653,48 +762,96 @@ export default function MatchDetailScreen(): React.ReactNode {
       ) : null}
 
       {/*
-        Toss. Shown to all players on the sheet for any uncancelled match.
+        Captain-to-Captain Chat for Team Fixtures
       */}
-      {!isCancelled ? (
+      {!isOver && data && data.team_a_id && data.team_b_id && isTeamCaptain ? (
         <View style={styles.card}>
-          <AppText variant="label">Toss</AppText>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <AppText variant="label">Captains Chat 💬</AppText>
+            <View style={[styles.badge, { backgroundColor: `${colors.primary}20` }]}>
+              <AppText variant="caption" color={colors.primary} style={{ fontWeight: '600' }}>
+                Direct Channel
+              </AppText>
+            </View>
+          </View>
           <AppText variant="caption" muted>
-            Decides who bats first. Either captain or organiser can flip; the result is generated on
-            the server.
+            Chat directly with{' '}
+            {isCreator
+              ? (sides.data?.team_b_name ?? 'opponent captain')
+              : (sides.data?.team_a_name ?? 'host captain')}{' '}
+            regarding ground location, arrival time, and match rules.
           </AppText>
           <View style={{ marginTop: spacing.sm }}>
             <Button
-              label="Open toss"
+              label="Open Captains Chat"
               variant="secondary"
-              onPress={() => router.push(`/match/${matchId}/toss`)}
+              onPress={() =>
+                router.push({
+                  pathname: '/chat/[id]',
+                  params: {
+                    id: matchId,
+                    matchId,
+                    teamName: isCreator ? sides.data?.team_b_name : sides.data?.team_a_name,
+                  },
+                })
+              }
             />
           </View>
         </View>
       ) : null}
 
       {/*
-        Scoring. Open to everyone on the sheet — watchers get the live score
-        read-only, and only the scorer sees the keypad.
+        Venue tag. Attached or cleared by organiser/captains.
       */}
-      {!isCancelled ? (
-        <View style={styles.card}>
-          <AppText variant="label">Scoring</AppText>
-          <AppText variant="caption" muted>
-            Ball by ball. The first captain or organiser to start the innings scores the
-            match; everyone else follows live.
-          </AppText>
-          <View style={{ marginTop: spacing.sm, gap: spacing.xs }}>
-            <Button
-              label="Live scoring"
-              variant="primary"
-              onPress={() => router.push(`/match/${matchId}/score`)}
-            />
-            <Button
-              label="Scorecard"
-              variant="secondary"
-              onPress={() => router.push(`/match/${matchId}/scorecard`)}
-            />
+      {!isOver ? (
+        <View style={[styles.card, !data.venue_id && isCreator && { borderColor: colors.primary }]}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <AppText variant="label">📍 Venue & Ground</AppText>
+            {!data.venue_id && isCreator ? (
+              <View style={[styles.badge, { backgroundColor: colors.warning }]}>
+                <AppText variant="caption" color="#FFFFFF" style={{ fontWeight: '600' }}>
+                  Action Required
+                </AppText>
+              </View>
+            ) : null}
           </View>
+          <AppText variant="caption" muted>
+            {data.venue_id
+              ? data.venue_text
+              : isCreator
+                ? 'Where are you playing? Pick the ground so both squads know where to go.'
+                : (data.venue_text || data.area_name || 'Your organiser has not picked a ground yet.')}
+          </AppText>
+          {/*
+            The app has no booking relationship with any turf, so it must never
+            imply the slot is held. Shown whenever a ground IS set.
+          */}
+          {data.venue_id ? (
+            <AppText variant="caption" muted style={{ marginTop: spacing.xs }}>
+              sixfour24 has not reserved this turf — call the ground to confirm your slot.
+            </AppText>
+          ) : null}
+          {isCreator ? (
+            <View style={{ marginTop: spacing.sm }}>
+              <Button
+                label={data.venue_id ? 'Change ground' : 'Select ground'}
+                variant={data.venue_id ? 'secondary' : 'primary'}
+                onPress={() => router.push(`/match/${matchId}/venue`)}
+              />
+            </View>
+          ) : null}
+        </View>
+      ) : null}
+
+      {needsLineup && myTeamId ? (
+        <View style={styles.card}>
+          <AppText variant="label">
+            {`Pick your ${lineupFormat} v ${lineupFormat} squad`}
+          </AppText>
+          <AppText variant="caption" muted>
+            {`Only the players you pick are notified about this match. ${mySideCount} of ${lineupFormat} named so far.`}
+          </AppText>
+          <Button label="Pick squad" onPress={() => setPickingLineup(true)} />
         </View>
       ) : null}
 
@@ -760,27 +917,65 @@ export default function MatchDetailScreen(): React.ReactNode {
       {isCreator && isOpenMatch ? (
         <View style={styles.card}>
           <AppText variant="label">
-            {isFull ? 'Your match is full' : `${seatsLeft} ${seatsLeft === 1 ? 'spot' : 'spots'} remaining`}
+            {isFull ? 'Your game is full' : `${seatsLeft} ${seatsLeft === 1 ? 'spot' : 'spots'} remaining`}
           </AppText>
           <AppText variant="caption" muted>
             {isFull
-              ? 'Nobody else can join. Lock the match when you are ready.'
-              : 'Share the match so the remaining places fill up.'}
+              ? 'Nobody else can join. Lock the game when you are ready.'
+              : 'Share the game so the remaining places fill up.'}
           </AppText>
-          <Button label="Share match" variant="secondary" onPress={onShareWhatsApp} />
+          <Button label="Share game" variant="secondary" onPress={onShareWhatsApp} />
+        </View>
+      ) : null}
+
+      {/*
+        The one thing this screen is for once everybody is in. Starting a match
+        IS locking it: `locked` is the status that already means "team is set,
+        the game is on", which is why there is no separate "Lock team" button
+        any more -- two buttons for one state change is how you get a host who
+        has locked the game and still cannot find how to start it.
+
+        Everything the game itself needs -- toss, keypad, scorecard -- lives in
+        the Match Center behind this button, so the lobby stays pre-match.
+      */}
+      {!isOver && !isCompleted ? (
+        <View style={{ gap: spacing.sm, marginTop: spacing.md }}>
+          {isCreator && data.status === 'open' ? (
+            <Button
+              label="Start match"
+              shine
+              loading={matchStatus.lock.isPending}
+              disabled={confirmedCount === 0}
+              onPress={onStartMatch}
+            />
+          ) : null}
+          {isCreator && data.status === 'locked' ? (
+            <Button
+              label="Resume match →"
+              onPress={() => router.push(`/match/${matchId}/live`)}
+            />
+          ) : null}
+          {/*
+            On the sheet but not running it. `membership.data` is the test: a
+            stranger who has not joined has no row and gets the join card above
+            instead of a window into somebody else's game.
+          */}
+          {!isCreator && membership.data && data.status === 'locked' ? (
+            <Button
+              label="Watch live scorecard →"
+              onPress={() => router.push(`/match/${matchId}/live?tab=live`)}
+            />
+          ) : null}
+          {!isCreator && membership.data && data.status === 'open' ? (
+            <AppText variant="caption" muted center>
+              Waiting for the host to start the match.
+            </AppText>
+          ) : null}
         </View>
       ) : null}
 
       {isCreator ? (
         <View style={{ gap: spacing.sm, marginTop: spacing.md }}>
-          {data.status === 'open' ? (
-            <Button
-              label="Lock team"
-              loading={matchStatus.lock.isPending}
-              disabled={confirmedCount === 0}
-              onPress={() => matchStatus.lock.mutate()}
-            />
-          ) : null}
           {data.status === 'locked' ? (
             <Button
               label="Mark completed"
@@ -790,13 +985,38 @@ export default function MatchDetailScreen(): React.ReactNode {
           ) : null}
           {canManage ? (
             <Button
-              label="Cancel match"
+              label="Cancel game"
               variant="danger"
               loading={matchStatus.cancel.isPending}
               onPress={onCancelMatch}
             />
           ) : null}
         </View>
+      ) : null}
+      {pickingLineup && myTeamId && userId ? (
+        <LineupPickerSheet
+          visible
+          onClose={() => setPickingLineup(false)}
+          teamId={myTeamId}
+          teamName={myTeamName ?? 'Your team'}
+          captainId={userId}
+          format={lineupFormat}
+          busy={setLineup.isPending}
+          confirmLabel="Save squad"
+          onConfirm={(userIds) =>
+            setLineup.mutate(
+              { teamId: myTeamId, userIds },
+              {
+                onSuccess: () => setPickingLineup(false),
+                onError: (e: unknown) =>
+                  Alert.alert(
+                    'Squad',
+                    e instanceof AppError ? e.message : 'Could not save the squad.',
+                  ),
+              },
+            )
+          }
+        />
       ) : null}
     </Screen>
   );
@@ -859,5 +1079,31 @@ const makeStyles = (colors: AppColors) =>
       alignItems: 'center',
       justifyContent: 'space-between',
       marginTop: spacing.xs,
+    },
+    radarBanner: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+      padding: spacing.md,
+      borderRadius: radius.lg,
+      borderWidth: 1.5,
+      borderColor: '#6cf8bb',
+      backgroundColor: '#0F1810',
+      marginBottom: spacing.lg,
+    },
+    radarPill: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+      borderRadius: radius.pill,
+      backgroundColor: '#6cf8bb',
+    },
+    radarDot: {
+      width: 6,
+      height: 6,
+      borderRadius: 3,
+      backgroundColor: '#000000',
     },
   });

@@ -19,6 +19,9 @@ const JOIN_ERRORS: [token: string, code: AppErrorCode, message: string][] = [
   ['NOT_AUTHENTICATED', 'unauthorized', 'Please sign in again.'],
   ['ACCOUNT_INACTIVE', 'forbidden', 'Your account is not active.'],
   ['TEAM_NOT_FOUND', 'not_found', 'No team found for that code.'],
+  // team_members_roster_cap. The trigger's DETAIL carries the live count,
+  // but the cap is fixed at 20, so a plain sentence is clearer than echoing it.
+  ['TEAM_ROSTER_FULL', 'conflict', 'That squad is full — a team can have at most 20 players.'],
 ];
 
 function joinErrorToAppError(error: unknown): AppError {
@@ -35,7 +38,14 @@ export const teamRepository = {
    * not here — that keeps the invariant true no matter who does the insert.
    * invite_code is UNIQUE; on the rare collision (23505) regenerate and retry.
    */
-  async create(input: { name: string; sport: Sport; ownerId: string }): Promise<Team> {
+  async create(input: {
+    name: string;
+    sport: Sport;
+    ownerId: string;
+    description?: string | null;
+    homeGround?: string | null;
+    logoUrl?: string | null;
+  }): Promise<Team> {
     for (let attempt = 0; attempt < 5; attempt += 1) {
       const inviteCode = generateShareCode();
       const { data, error } = await supabase
@@ -45,6 +55,9 @@ export const teamRepository = {
           sport: input.sport,
           owner_id: input.ownerId,
           invite_code: inviteCode,
+          description: input.description?.trim() || null,
+          home_ground: input.homeGround?.trim() || null,
+          logo_url: input.logoUrl ?? null,
         })
         .select('*')
         .single();
@@ -59,16 +72,36 @@ export const teamRepository = {
   },
 
   async uploadLogo(teamId: string, base64: string): Promise<string> {
-    const binary = atob(base64); const bytes = new Uint8Array(binary.length);
+    const cleanBase64 = base64.replace(/^data:image\/\w+;base64,/, '').replace(/[\r\n\s]+/g, '');
+    const binary = atob(cleanBase64);
+    const bytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
     const path = `${teamId}/logo.jpg`;
-    const { error } = await supabase.storage.from('team-logos').upload(path, bytes, { contentType: 'image/jpeg', upsert: true });
+    const { error } = await supabase.storage
+      .from('team-logos')
+      .upload(path, bytes, { contentType: 'image/jpeg', upsert: true });
     if (error) throw toAppError(error);
     const { data } = supabase.storage.from('team-logos').getPublicUrl(path);
     const url = `${data.publicUrl}?v=${Date.now()}`;
-    const { error: updateError } = await supabase.from('teams').update({ logo_url: url }).eq('id', teamId);
+    const { error: updateError } = await supabase
+      .from('teams')
+      .update({ logo_url: url })
+      .eq('id', teamId);
     if (updateError) throw toAppError(updateError);
     return url;
+  },
+
+  async removeLogo(teamId: string): Promise<void> {
+    try {
+      await supabase.storage.from('team-logos').remove([`${teamId}/logo.jpg`]);
+    } catch {
+      // Ignore if not present
+    }
+    const { error } = await supabase
+      .from('teams')
+      .update({ logo_url: null })
+      .eq('id', teamId);
+    if (error) throw toAppError(error);
   },
 
   /** Teams the user belongs to. RLS already limits rows to their memberships. */
@@ -105,15 +138,77 @@ export const teamRepository = {
   },
 
   async getOverview(teamId: string) {
-    const { data, error } = await supabase.rpc('get_team_overview', { in_team_id: teamId });
-    if (error) throw toAppError(error);
-    return data?.[0] ?? null;
+    try {
+      const { data, error } = await supabase.rpc('get_team_overview', { in_team_id: teamId });
+      if (!error && data && data.length > 0 && data[0]) {
+        return data[0];
+      }
+    } catch {
+      // Fallback below
+    }
+
+    // Direct fallback from teams and public_profiles tables
+    const { data: team, error: teamErr } = await supabase
+      .from('teams')
+      .select('id, name, sport, invite_code, created_at, description, logo_url, home_ground, owner_id, target_size')
+      .eq('id', teamId)
+      .maybeSingle();
+
+    if (teamErr) throw toAppError(teamErr);
+    if (!team) return null;
+
+    const { data: sessionData } = await supabase.auth.getSession();
+    const currentUserId = sessionData.session?.user?.id ?? null;
+
+    const [ownerRes, memberCountRes, myMemberRes] = await Promise.all([
+      supabase.from('public_profiles').select('full_name, avatar_url').eq('id', team.owner_id).maybeSingle(),
+      supabase.from('team_members').select('id', { count: 'exact', head: true }).eq('team_id', teamId),
+      currentUserId
+        ? supabase.from('team_members').select('role').eq('team_id', teamId).eq('user_id', currentUserId).maybeSingle()
+        : Promise.resolve({ data: null }),
+    ]);
+
+    const isOwner = Boolean(currentUserId && team.owner_id === currentUserId);
+    const isMember = Boolean(myMemberRes.data);
+
+    return {
+      id: team.id,
+      name: team.name,
+      sport: team.sport,
+      invite_code: (isOwner || isMember) ? team.invite_code : null,
+      created_at: team.created_at,
+      description: team.description,
+      logo_url: team.logo_url,
+      home_ground: team.home_ground,
+      owner_id: team.owner_id,
+      captain_name: ownerRes.data?.full_name ?? null,
+      captain_avatar: ownerRes.data?.avatar_url ?? null,
+      player_count: memberCountRes.count ?? 0,
+      my_role: myMemberRes.data?.role ?? null,
+      i_am_owner: isOwner,
+      target_size: team.target_size,
+    };
   },
 
   async getStats(teamId: string) {
-    const { data, error } = await supabase.rpc('get_team_stats', { in_team_id: teamId });
-    if (error) throw toAppError(error);
-    return data?.[0] ?? null;
+    try {
+      const { data, error } = await supabase.rpc('get_team_stats', { in_team_id: teamId });
+      if (!error && data && data.length > 0 && data[0]) {
+        return data[0];
+      }
+    } catch {
+      // Return default empty stats
+    }
+    return {
+      team_id: teamId,
+      matches_played: 0,
+      wins: 0,
+      losses: 0,
+      ties: 0,
+      win_rate: 0,
+      highest_score: null,
+      lowest_score: null,
+    };
   },
 
   async getFixtures(teamId: string) {
@@ -124,11 +219,6 @@ export const teamRepository = {
 
   async update(teamId: string, input: { name: string; description: string; homeGround: string }) {
     const { error } = await supabase.from('teams').update({ name: input.name, description: input.description || null, home_ground: input.homeGround || null }).eq('id', teamId);
-    if (error) throw toAppError(error);
-  },
-
-  async setMemberRole(teamId: string, userId: string, role: 'member' | 'vice_captain') {
-    const { error } = await supabase.rpc('set_member_role', { in_team_id: teamId, in_user_id: userId, in_role: role });
     if (error) throw toAppError(error);
   },
 

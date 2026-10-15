@@ -12,6 +12,7 @@ import { R, S, useMock, type MockPalette } from '@shared/theme/mockTheme';
 import { AppLogo } from '@shared/ui/AppLogo';
 import { AppText } from '@shared/ui/AppText';
 import { IconBadminton, IconClose, IconCricket, IconPlus, IconUser } from '@shared/ui/icons';
+import { PressableScale } from '@shared/ui/PressableScale';
 import { SPORT_IMAGE } from '@shared/ui/sportImages';
 import type { Sport } from '@shared/types/database.types';
 
@@ -200,7 +201,7 @@ export default function CreateProfileScreen(): React.ReactNode {
           </AppText>
         ) : null}
 
-        <Pressable
+        <PressableScale
           disabled={!canSubmit}
           style={({ pressed }) => [
             styles.cta,
@@ -215,7 +216,7 @@ export default function CreateProfileScreen(): React.ReactNode {
               Ready to Play
             </AppText>
           )}
-        </Pressable>
+        </PressableScale>
       </ScrollView>
     </SafeAreaView>
   );

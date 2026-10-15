@@ -93,7 +93,7 @@ function readProjectId(): string | null {
 async function ensureAndroidChannel(mod: typeof ExpoNotifications): Promise<void> {
   if (Platform.OS !== 'android') return;
   await mod.setNotificationChannelAsync(ANDROID_CHANNEL_ID, {
-    name: 'Match updates',
+    name: 'Game updates',
     importance: mod.AndroidImportance.HIGH,
     vibrationPattern: [0, 250, 250, 250],
     lockscreenVisibility: mod.AndroidNotificationVisibility.PUBLIC,

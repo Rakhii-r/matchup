@@ -83,7 +83,7 @@ export default function PlayerProfile(): React.ReactNode {
       </View>
       <View style={styles.stats}>
         {[
-          ['Matches', p.matches_played],
+          ['Games', p.matches_played],
           ['Wins', p.wins],
           ['Win Rate', p.matches_played ? `${p.win_rate}%` : '—'],
           ['MVP', p.motm],
@@ -97,7 +97,7 @@ export default function PlayerProfile(): React.ReactNode {
         ))}
       </View>
       <View style={styles.card}>
-        <AppText variant="label">Match Record</AppText>
+        <AppText variant="label">Game Record</AppText>
         <AppText>Wins: {p.wins}</AppText>
         <AppText>Win rate: {p.matches_played ? `${p.win_rate}%` : '—'}</AppText>
       </View>

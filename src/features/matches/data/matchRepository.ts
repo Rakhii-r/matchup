@@ -4,7 +4,12 @@ import type { AppErrorCode } from '@core/errors/AppError';
 import { logger } from '@core/logging/logger';
 import { generateShareCode } from '@features/matches/domain/matchSchema';
 import type { Match, MatchPlayer } from '@features/matches/domain/matchSchema';
-import type { GameType, JoinedVia, PlayerStatus, Sport } from '@shared/types/database.types';
+import type {
+  Database,
+  JoinedVia,
+  PlayerStatus,
+  Sport,
+} from '@shared/types/database.types';
 import {
   formatConflictWindow,
   parseScheduleConflict,
@@ -19,28 +24,84 @@ import {
 const JOIN_ERRORS: [token: string, code: AppErrorCode, message: string][] = [
   ['NOT_AUTHENTICATED', 'unauthorized', 'Please sign in again.'],
   ['ACCOUNT_INACTIVE', 'forbidden', 'Your account is not active.'],
-  ['INVALID_JOIN_SOURCE', 'validation', 'Could not join that match. Please try again.'],
-  ['MATCH_NOT_FOUND', 'not_found', 'That match is no longer available.'],
-  ['OWN_MATCH', 'conflict', 'This is your own match.'],
-  ['MATCH_NOT_OPEN', 'conflict', 'That match is no longer open to join.'],
-  ['MATCH_STARTED', 'conflict', 'That match has already started.'],
-  ['MATCH_FULL', 'conflict', 'That match is already full.'],
+  ['INVALID_JOIN_SOURCE', 'validation', 'Could not join that game. Please try again.'],
+  ['MATCH_NOT_FOUND', 'not_found', 'That game is no longer available.'],
+  ['OWN_MATCH', 'conflict', 'This is your own game.'],
+  ['MATCH_NOT_OPEN', 'conflict', 'That game is no longer open to join.'],
+  ['MATCH_STARTED', 'conflict', 'That game has already started.'],
+  ['MATCH_FULL', 'conflict', 'That game is already full.'],
   // respond_to_match_invite
-  ['NOT_INVITED', 'not_found', 'You are not on the sheet for this match.'],
+  ['NOT_INVITED', 'not_found', 'You are not on the sheet for this game.'],
   ['INVITE_ALREADY_ANSWERED', 'conflict', 'You have already answered this one.'],
-  ['MATCH_ALREADY_STARTED', 'conflict', 'That match has already started.'],
+  ['MATCH_ALREADY_STARTED', 'conflict', 'That game has already started.'],
+  // delete_match
+  ['MATCH_HAS_PLAYERS', 'conflict', 'Players have already joined, so this game can only be cancelled.'],
+  ['MATCH_ALREADY_PLAYED', 'conflict', 'This game has been played, so it can no longer be deleted.'],
   // create_open_match / join_open_match. PLAYER_SCHEDULE_CONFLICT is handled
   // separately below because it carries the clashing window in the message.
-  ['NOT_OPEN_MATCH', 'conflict', 'That match is not open for individual players.'],
+  ['NOT_OPEN_MATCH', 'conflict', 'That game is not open for individual players.'],
   ['INVALID_SPORT', 'validation', 'Pick a sport.'],
-  ['INVALID_GAME_TYPE', 'validation', 'Pick a game type.'],
-  ['INVALID_SLOTS', 'validation', 'Pick how many players the match needs.'],
+  ['INVALID_SLOTS', 'validation', 'Pick how many players the game needs.'],
   ['INVALID_RADIUS', 'validation', 'Pick a search distance.'],
   ['SCHEDULE_IN_PAST', 'validation', 'Pick a date and time in the future.'],
   ['END_BEFORE_START', 'validation', 'The end time must be after the start time.'],
   ['VENUE_NOT_FOUND', 'not_found', 'That venue is no longer available.'],
   ['VENUE_SPORT_MISMATCH', 'validation', 'That venue does not host the selected sport.'],
 ];
+
+/**
+ * `create_rematch`'s refusals, in the organiser's words.
+ *
+ * SLOT_EXPIRED is the one that matters: it is not a failure, it is the booked
+ * time running out, and it is also the only one the UI cannot always prevent —
+ * the countdown on the result screen can be up to a tick behind the server, and
+ * a player can sit on that screen while the slot closes underneath them.
+ */
+const REMATCH_ERRORS: [string, AppErrorCode, string][] = [
+  [
+    'SLOT_EXPIRED',
+    'conflict',
+    'Your booked slot has ended, so no new round can start in it. Book another slot to keep playing.',
+  ],
+  ['MATCH_NOT_COMPLETED', 'conflict', 'Finish this round before starting the next one.'],
+  // create_rematch is organiser-only as of creator_only_toss_and_scoring.
+  ['NOT_THE_ORGANISER', 'unauthorized', 'Only the game organiser can start the next round.'],
+  ['NOT_ALLOWED_TO_REMATCH', 'unauthorized', 'Only the game organiser can start the next round.'],
+  ['MATCH_NOT_FOUND', 'not_found', 'That game no longer exists.'],
+];
+
+function rematchErrorToAppError(error: unknown): AppError {
+  const raw = (error as { message?: string } | null)?.message ?? '';
+  for (const [token, code, message] of REMATCH_ERRORS) {
+    if (raw.includes(token)) return new AppError(code, message, error);
+  }
+  return toAppError(error);
+}
+
+/**
+ * `set_match_venue`'s refusals.
+ *
+ * The organiser gate is the same one that governs toss, scoring and rematch —
+ * one person holds the app on the ground. Everyone else reads, so the UI shows
+ * a stated line rather than a button that fails; these messages are the
+ * backstop for the cases the UI cannot pre-empt (the match finished in another
+ * session, the admin retired the venue).
+ */
+const VENUE_ERRORS: [string, AppErrorCode, string][] = [
+  ['NOT_THE_ORGANISER', 'unauthorized', 'Only the game organiser can set the venue.'],
+  ['MATCH_NOT_FOUND', 'not_found', 'That game no longer exists.'],
+  ['MATCH_ALREADY_STARTED', 'conflict', 'This game has already finished.'],
+  ['VENUE_NOT_FOUND', 'not_found', 'That venue is no longer available.'],
+  ['VENUE_SPORT_MISMATCH', 'validation', 'That ground does not host this sport.'],
+];
+
+function venueErrorToAppError(error: unknown): AppError {
+  const raw = (error as { message?: string } | null)?.message ?? '';
+  for (const [token, code, message] of VENUE_ERRORS) {
+    if (raw.includes(token)) return new AppError(code, message, error);
+  }
+  return toAppError(error);
+}
 
 // A match can still be in progress after its scheduled start. Keep it in
 // discovery for a generous playing window, but never let an old row that was
@@ -61,7 +122,7 @@ function joinErrorToAppError(error: unknown): AppError {
 
   // Requirement: a player is blocked only by an OVERLAPPING booking, never by
   // merely having another match on another day — so the message names the one
-  // that actually clashes instead of saying "you already have a match".
+  // that actually clashes instead of saying "you already have a game".
   const clash = parseScheduleConflict(raw, 'PLAYER_SCHEDULE_CONFLICT');
   if (clash) {
     return new AppError(
@@ -92,12 +153,9 @@ export interface CreateMatchInput {
   lng: number;
   notes?: string | null;
   /**
-   * Both optional and both nullable: every caller that predates the create
-   * wizard passes neither, which leaves the `game_type` column default and a
-   * null `end_time`. They were being passed by useCreateMatch already and
-   * silently dropped here, which is why the column never moved.
+   * Optional and nullable: every caller that predates the create wizard passes
+   * nothing, which leaves a null `end_time`.
    */
-  gameType?: GameType | null;
   endTime?: string | null;
 }
 
@@ -112,7 +170,6 @@ export interface CreateOpenMatchInput {
   endTime: string | null;
   /** Seats on the sheet — twice the players-per-side chip. */
   totalSlots: number;
-  gameType: GameType;
   /** Metres. The chips are kilometres and multiply by 1000. */
   radiusM: number;
   lat?: number | null;
@@ -131,17 +188,21 @@ export interface PlayerWithProfile extends MatchPlayer {
   side: 'a' | 'b' | null;
 }
 
+/**
+ * One game inside a booked slot, as `get_match_series` returns it.
+ *
+ * `game_number` is positional within the series (1 = the match that opened the
+ * slot), not stored on the row — a game deleted from the middle renumbers the
+ * ones after it, which is what the series widget should show anyway.
+ */
+export type SeriesGame = Database['public']['Functions']['get_match_series']['Returns'][number];
+
 /** The two squads in a team fixture, for the match header. */
 export interface MatchSides {
   team_a_id: string | null;
   team_a_name: string | null;
   team_b_id: string | null;
   team_b_name: string | null;
-}
-
-export interface AttendanceRow {
-  user_id: string;
-  attended: boolean;
 }
 
 /** A match the current user joined, paired with their own queue status on it. */
@@ -175,7 +236,6 @@ export const matchRepository = {
           lng: input.lng,
           share_code: shareCode,
           notes: input.notes ?? null,
-          ...(input.gameType ? { game_type: input.gameType } : {}),
           end_time: input.endTime ?? null,
         })
         .select('*')
@@ -204,6 +264,19 @@ export const matchRepository = {
    * RPC under an advisory lock, because a client-side check can always be stale
    * by the time the user taps Post.
    */
+  /**
+   * Delete a posted game outright.
+   *
+   * Distinct from cancelling: this removes the row. The RPC allows it only
+   * while the organiser is the sole person on the sheet -- once anyone else has
+   * joined, deleting would strand them with no record and no explanation, and
+   * `MATCH_HAS_PLAYERS` comes back so the caller can offer Cancel instead.
+   */
+  async deleteMatch(matchId: string): Promise<void> {
+    const { error } = await supabase.rpc('delete_match', { in_match_id: matchId });
+    if (error) throw joinErrorToAppError(error);
+  },
+
   async createOpen(input: CreateOpenMatchInput): Promise<Match> {
     const { data, error } = await supabase.rpc('create_open_match', {
       in_sport: input.sport,
@@ -212,14 +285,13 @@ export const matchRepository = {
       in_scheduled_at: input.scheduledAt,
       in_total_slots: input.totalSlots,
       in_end_time: input.endTime ?? null,
-      in_game_type: input.gameType,
       in_radius_m: input.radiusM,
       in_lat: input.lat ?? null,
       in_lng: input.lng ?? null,
       in_venue_id: input.venueId ?? null,
     });
     if (error) throw joinErrorToAppError(error);
-    if (!data) throw new AppError('unknown', 'Could not post the match. Please try again.');
+    if (!data) throw new AppError('unknown', 'Could not post the game. Please try again.');
     return data;
   },
 
@@ -237,7 +309,7 @@ export const matchRepository = {
       in_joined_via: joinedVia,
     });
     if (error) throw joinErrorToAppError(error);
-    if (!data) throw new AppError('unknown', 'Could not join that match. Please try again.');
+    if (!data) throw new AppError('unknown', 'Could not join that game. Please try again.');
     return data;
   },
 
@@ -249,9 +321,45 @@ export const matchRepository = {
     const { data, error } = await supabase.rpc('create_rematch', {
       in_match_id: matchId,
     });
-    if (error) throw toAppError(error);
-    if (!data) throw new AppError('unknown', 'Could not create rematch. Please try again.');
+    // Mapped, not raw: SLOT_EXPIRED is a normal end to a session and the
+    // organiser needs to read it as one, not as "Could not start the next round".
+    if (error) throw rematchErrorToAppError(error);
+    if (!data) throw new AppError('unknown', 'Could not start the next round. Please try again.');
     return data;
+  },
+
+  /**
+   * Attach a venue to an existing match, or clear it by passing null.
+   *
+   * The create wizard captures an AREA and defers the venue: booking a ground
+   * is a spend, creating a match is only an intent. This is how the organiser
+   * attaches the ground once they have actually booked it.
+   *
+   * Does not move the match's discovery coordinates — see the migration.
+   */
+  async setVenue(matchId: string, venueId: string | null): Promise<Match> {
+    const { data, error } = await supabase.rpc('set_match_venue', {
+      in_match_id: matchId,
+      in_venue_id: venueId,
+    });
+    if (error) throw venueErrorToAppError(error);
+    if (!data) throw new AppError('unknown', 'Could not save the venue. Please try again.');
+    return data;
+  },
+
+  /**
+   * Every game played in this match's booked slot, oldest first.
+   *
+   * Returns an empty array rather than throwing when the caller is not on the
+   * match: the RPC filters on visibility and simply yields no rows, and a
+   * series widget with nothing in it is the right rendering of that.
+   */
+  async listSeries(matchId: string): Promise<SeriesGame[]> {
+    const { data, error } = await supabase.rpc('get_match_series', {
+      in_match_id: matchId,
+    });
+    if (error) throw toAppError(error);
+    return data ?? [];
   },
 
   async getById(matchId: string): Promise<Match | null> {
@@ -329,14 +437,16 @@ export const matchRepository = {
       .from('matches')
       .select('*')
       .eq('creator_id', userId)
-      .order('scheduled_at', { ascending: false });
+      .order('scheduled_at', { ascending: false })
+      .limit(100);
     if (createdErr) throw toAppError(createdErr);
 
     const { data: joined, error: joinedErr } = await supabase
       .from('match_players')
       .select('status, match:matches(*)')
       .eq('user_id', userId)
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .limit(100);
     if (joinedErr) throw toAppError(joinedErr);
 
     const matchMap = new Map<string, {
@@ -366,17 +476,17 @@ export const matchRepository = {
     );
   },
 
-  async nearby(input: {
-    lat: number;
-    lng: number;
-    radiusM: number;
-    sport: Sport | null;
+  async nearby(input?: {
+    lat?: number | null;
+    lng?: number | null;
+    radiusM?: number | null;
+    sport?: Sport | null;
   }): Promise<Match[]> {
     const { data, error } = await supabase.rpc('nearby_matches', {
-      in_lat: input.lat,
-      in_lng: input.lng,
-      in_radius_m: input.radiusM,
-      in_sport: input.sport,
+      in_lat: (input?.lat ?? null) as unknown as number,
+      in_lng: (input?.lng ?? null) as unknown as number,
+      in_radius_m: (input?.radiusM ?? null) as unknown as number,
+      in_sport: input?.sport ?? null,
     });
     if (error) throw toAppError(error);
     // Keep this defensive filter even after the database migration is applied:
@@ -456,7 +566,7 @@ export const matchRepository = {
       in_joined_via: joinedVia,
     });
     if (error) throw joinErrorToAppError(error);
-    if (!data) throw new AppError('unknown', 'Could not join that match. Please try again.');
+    if (!data) throw new AppError('unknown', 'Could not join that game. Please try again.');
     return data;
   },
 
@@ -491,30 +601,4 @@ export const matchRepository = {
     if (error) throw toAppError(error);
   },
 
-  async markAttendance(input: {
-    matchId: string;
-    userId: string;
-    attended: boolean;
-    markedBy: string;
-  }): Promise<void> {
-    const { error } = await supabase.from('attendance').upsert(
-      {
-        match_id: input.matchId,
-        user_id: input.userId,
-        attended: input.attended,
-        marked_by: input.markedBy,
-      },
-      { onConflict: 'match_id,user_id' },
-    );
-    if (error) throw toAppError(error);
-  },
-
-  async listAttendance(matchId: string): Promise<AttendanceRow[]> {
-    const { data, error } = await supabase
-      .from('attendance')
-      .select('user_id, attended')
-      .eq('match_id', matchId);
-    if (error) throw toAppError(error);
-    return data ?? [];
-  },
 };

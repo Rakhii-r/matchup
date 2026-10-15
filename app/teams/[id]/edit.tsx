@@ -5,7 +5,7 @@ import * as ImagePicker from 'expo-image-picker';
 
 import { AppError } from '@core/errors/AppError';
 import { teamRepository } from '@features/teams/data/teamRepository';
-import { useTeamOverview, useUpdateTeam } from '@features/teams/presentation/useTeams';
+import { useTeamOverview, useUpdateTeam, useUploadTeamLogo, useRemoveTeamLogo } from '@features/teams/presentation/useTeams';
 import { S, useMock, type MockPalette } from '@shared/theme/mockTheme';
 import { AppText } from '@shared/ui/AppText';
 import { Button } from '@shared/ui/Button';
@@ -61,28 +61,38 @@ function EditForm({
   const styles = useMemo(() => makeStyles(M), [M]);
   const router = useRouter();
   const save = useUpdateTeam(teamId);
+  const uploadLogo = useUploadTeamLogo(teamId);
+  const removeLogo = useRemoveTeamLogo(teamId);
 
   const [name, setName] = useState(initial.name);
   const [description, setDescription] = useState(initial.description ?? '');
   const [homeGround, setHomeGround] = useState(initial.home_ground ?? '');
   const [logoUri, setLogoUri] = useState<string | null>(initial.logo_url ?? null);
   const [logoBase64, setLogoBase64] = useState<string | null>(null);
+  const [removePhoto, setRemovePhoto] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const pickLogo = async (): Promise<void> => {
     try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        setError('Photo permission is needed to choose a team photo.');
+        return;
+      }
       const res = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
         allowsEditing: true,
         aspect: [1, 1],
-        quality: 0.8,
+        quality: 0.7,
         base64: true,
       });
       if (!res.canceled && res.assets[0]) {
         setLogoUri(res.assets[0].uri);
         if (res.assets[0].base64) {
           setLogoBase64(res.assets[0].base64);
+          setRemovePhoto(false);
+          setError(null);
         }
       }
     } catch {
@@ -90,12 +100,20 @@ function EditForm({
     }
   };
 
+  const handleRemovePhoto = () => {
+    setLogoUri(null);
+    setLogoBase64(null);
+    setRemovePhoto(true);
+  };
+
   const submit = async () => {
     try {
       setError(null);
-      if (logoBase64) {
-        setUploadingLogo(true);
-        await teamRepository.uploadLogo(teamId, logoBase64);
+      setUploadingLogo(true);
+      if (removePhoto && initial.logo_url) {
+        await removeLogo.mutateAsync();
+      } else if (logoBase64) {
+        await uploadLogo.mutateAsync(logoBase64);
       }
       await save.mutateAsync({
         name: name.trim(),
@@ -110,7 +128,7 @@ function EditForm({
     }
   };
 
-  const isSaving = save.isPending || uploadingLogo;
+  const isSaving = save.isPending || uploadingLogo || uploadLogo.isPending || removeLogo.isPending;
 
   return (
     <Screen scroll>
@@ -121,6 +139,7 @@ function EditForm({
           style={styles.logoButton}
           accessibilityRole="button"
           accessibilityLabel="Change team photo"
+          disabled={isSaving}
         >
           {logoUri ? (
             <Image source={{ uri: logoUri }} style={styles.logo} />
@@ -130,12 +149,27 @@ function EditForm({
             </View>
           )}
           <View style={styles.cameraBadge}>
-            <IconCamera color={M.limeInk} size={16} />
+            {uploadingLogo ? (
+              <ActivityIndicator size="small" color={M.limeInk} />
+            ) : (
+              <IconCamera color={M.limeInk} size={16} />
+            )}
           </View>
         </Pressable>
-        <AppText variant="caption" color={M.muted}>
-          Tap to change team photo
-        </AppText>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: S.md }}>
+          <Pressable onPress={() => void pickLogo()} disabled={isSaving}>
+            <AppText variant="caption" color={M.green} style={{ fontWeight: '600' }}>
+              {logoUri ? 'Change photo' : 'Upload photo'}
+            </AppText>
+          </Pressable>
+          {logoUri ? (
+            <Pressable onPress={handleRemovePhoto} disabled={isSaving}>
+              <AppText variant="caption" color={M.danger}>
+                Remove
+              </AppText>
+            </Pressable>
+          ) : null}
+        </View>
       </View>
 
       <TextField label="Team name" value={name} onChangeText={setName} maxLength={50} />

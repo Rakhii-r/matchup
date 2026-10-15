@@ -1,0 +1,186 @@
+import { useCallback, useMemo, useState } from 'react';
+import { ActivityIndicator, FlatList, StyleSheet, TextInput, View } from 'react-native';
+import { Stack } from 'expo-router';
+
+import { useUsers } from '@features/admin/presentation/useModeration';
+import type { AdminUser } from '@features/admin/data/adminRepository';
+import { useSportLabel } from '@features/sports/presentation/useSports';
+import { radius, spacing, type AppColors } from '@shared/theme';
+import { useTheme } from '@shared/theme/ThemeContext';
+import { AppText } from '@shared/ui/AppText';
+import { Button } from '@shared/ui/Button';
+import { IconSearch } from '@shared/ui/icons';
+import { Screen } from '@shared/ui/Screen';
+
+function formatJoined(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime())
+    ? '—'
+    : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+/**
+ * Read-only directory of every user, for superadmins.
+ * Server access is enforced by the profiles_admin_select RLS policy.
+ */
+export default function AdminUsersScreen(): React.ReactNode {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const { data: users, isLoading, isError, refetch, isRefetching } = useUsers();
+  const sportLabel = useSportLabel();
+  const [search, setSearch] = useState('');
+
+  const filteredUsers = useMemo(() => {
+    if (!users) return [];
+    if (!search.trim()) return users;
+    const q = search.toLowerCase();
+    return users.filter(
+      (u) =>
+        (u.full_name && u.full_name.toLowerCase().includes(q)) ||
+        (u.phone && u.phone.includes(q)) ||
+        (u.area_name && u.area_name.toLowerCase().includes(q)),
+    );
+  }, [users, search]);
+
+  const renderItem = useCallback(
+    ({ item }: { item: AdminUser }) => {
+      const sports = (item.sport_pref ?? []).map((s) => sportLabel(s)).join(', ');
+      return (
+        <View style={styles.card}>
+          <View style={styles.rowTop}>
+            <AppText variant="label" style={{ flex: 1, fontSize: 16 }}>
+              {item.full_name || 'Unnamed Player'}
+            </AppText>
+            {!item.is_active ? (
+              <View style={[styles.badge, { backgroundColor: `${colors.danger}20` }]}>
+                <AppText variant="caption" style={{ color: colors.danger, fontWeight: '700' }}>
+                  Deactivated
+                </AppText>
+              </View>
+            ) : (
+              <View style={[styles.badge, { backgroundColor: `${colors.primary}20` }]}>
+                <AppText variant="caption" style={{ color: colors.primary, fontWeight: '700' }}>
+                  Active
+                </AppText>
+              </View>
+            )}
+          </View>
+          {item.area_name ? (
+            <AppText variant="caption" muted>
+              📍 {item.area_name}
+            </AppText>
+          ) : null}
+          <AppText variant="caption" muted>
+            📞 {item.phone ?? 'No phone number'}
+          </AppText>
+          {sports ? (
+            <AppText variant="caption" muted>
+              🏅 {sports}
+            </AppText>
+          ) : null}
+          <AppText variant="caption" muted style={{ marginTop: 2, fontSize: 11 }}>
+            Joined {formatJoined(item.created_at)} · ID: {item.id.slice(0, 8)}...
+          </AppText>
+        </View>
+      );
+    },
+    [colors, styles, sportLabel],
+  );
+
+  return (
+    <Screen>
+      <Stack.Screen options={{ title: 'User Directory' }} />
+
+      <View style={styles.searchContainer}>
+        <IconSearch color={colors.textMuted} size={18} />
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search by name, phone, area..."
+          placeholderTextColor={colors.textMuted}
+          value={search}
+          onChangeText={setSearch}
+        />
+      </View>
+
+      {isLoading ? (
+        <View style={styles.center}>
+          <ActivityIndicator color={colors.primary} />
+        </View>
+      ) : isError ? (
+        <View style={styles.center}>
+          <AppText muted>Could not load users.</AppText>
+          <Button label="Retry" variant="secondary" onPress={() => void refetch()} />
+        </View>
+      ) : (
+        <FlatList
+          data={filteredUsers}
+          keyExtractor={(u) => u.id}
+          renderItem={renderItem}
+          onRefresh={() => void refetch()}
+          refreshing={isRefetching}
+          contentContainerStyle={{ paddingBottom: spacing.xxl }}
+          ItemSeparatorComponent={() => <View style={{ height: spacing.sm }} />}
+          ListHeaderComponent={
+            <AppText variant="caption" muted style={{ marginBottom: spacing.sm }}>
+              Showing {filteredUsers.length} of {users?.length ?? 0} user
+              {users?.length === 1 ? '' : 's'}
+            </AppText>
+          }
+          ListEmptyComponent={
+            <View style={styles.center}>
+              <AppText muted>No matching users found.</AppText>
+            </View>
+          }
+        />
+      )}
+    </Screen>
+  );
+}
+
+const makeStyles = (colors: AppColors) =>
+  StyleSheet.create({
+    searchContainer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+      paddingHorizontal: spacing.md,
+      minHeight: 44,
+      borderRadius: radius.md,
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.border,
+      marginBottom: spacing.md,
+    },
+    searchInput: {
+      flex: 1,
+      color: colors.text,
+      fontSize: 14,
+    },
+    center: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: spacing.md,
+      paddingTop: spacing.xxl,
+    },
+    card: {
+      gap: spacing.xs,
+      padding: spacing.md,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+    },
+    rowTop: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: spacing.sm,
+      marginBottom: 2,
+    },
+    badge: {
+      paddingHorizontal: 8,
+      paddingVertical: 2,
+      borderRadius: radius.pill,
+    },
+  });

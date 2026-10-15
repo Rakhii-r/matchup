@@ -12,9 +12,10 @@ import {
 } from '@features/availability/presentation/useAvailability';
 import { useSportLabel } from '@features/sports/presentation/useSports';
 import { R, S, useMock, type MockPalette } from '@shared/theme/mockTheme';
+import { useTabContentPadding } from '@shared/theme/responsive';
 import { AppLogo } from '@shared/ui/AppLogo';
 import { AppText } from '@shared/ui/AppText';
-import { IconBolt, IconGear, IconMenu, IconPin } from '@shared/ui/icons';
+import { IconBolt, IconPin } from '@shared/ui/icons';
 import type { Sport } from '@shared/types/database.types';
 
 function initials(name: string): string {
@@ -28,6 +29,9 @@ function initials(name: string): string {
 
 export default function AvailableScreen(): React.ReactNode {
   const M = useMock();
+  // Reserve the tab bar plus the device's bottom inset, or the last card in
+  // this list sits underneath the bar.
+  const tabContentPadding = useTabContentPadding();
   const styles = useMemo(() => makeStyles(M), [M]);
   const session = useAuthStore((s) => s.session);
   const profile = useAuthStore((s) => s.profile);
@@ -62,12 +66,10 @@ export default function AvailableScreen(): React.ReactNode {
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
       <View style={styles.header}>
-        <IconMenu color={M.text} />
-        <AppLogo width={84} />
-        <View style={{ width: 24 }} />
+        <AppLogo variant="icon" width={48} style={{ borderRadius: 12 }} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: tabContentPadding }]} showsVerticalScrollIndicator={false}>
         {/* Hero + toggle */}
         <View style={styles.hero}>
           <View style={styles.heroTop}>

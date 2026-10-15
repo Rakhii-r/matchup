@@ -9,6 +9,7 @@ import {
   FlatList,
   Image,
   Pressable,
+  ScrollView,
   StyleSheet,
   View,
 } from 'react-native';
@@ -21,12 +22,18 @@ import type { ChallengeListItem } from '@features/teams/domain/challengeSchema';
 import type { Match } from '@features/matches/domain/matchSchema';
 import { R, S, useMock, type MockPalette } from '@shared/theme/mockTheme';
 import { AppText } from '@shared/ui/AppText';
+import { CalendarArt, RoundBack, StadiumBackdrop } from '@shared/ui/decor';
 import {
-  IconBack,
+  IconArrowRight,
+  IconBolt,
   IconCalendar,
+  IconCheckCircle,
   IconClock,
+  IconGrid,
+  IconLive,
   IconPin,
   IconPlus,
+  type IconProps,
 } from '@shared/ui/icons';
 import { SPORT_IMAGE } from '@shared/ui/sportImages';
 
@@ -34,11 +41,11 @@ const TOUCH = 44;
 
 type FilterTab = 'upcoming' | 'live' | 'completed' | 'all';
 
-const TABS: { key: FilterTab; label: string }[] = [
-  { key: 'upcoming', label: 'Upcoming' },
-  { key: 'live', label: 'Live' },
-  { key: 'completed', label: 'Completed' },
-  { key: 'all', label: 'All Matches' },
+const TABS: { key: FilterTab; label: string; Icon: (p: IconProps) => React.ReactNode }[] = [
+  { key: 'upcoming', label: 'Upcoming', Icon: IconCalendar },
+  { key: 'live', label: 'Live', Icon: IconLive },
+  { key: 'completed', label: 'Completed', Icon: IconCheckCircle },
+  { key: 'all', label: 'All Games', Icon: IconGrid },
 ];
 
 function formatWhen(iso: string): string {
@@ -53,9 +60,13 @@ function formatWhen(iso: string): string {
   });
 }
 
-function getMatchCategory(m: Match): 'upcoming' | 'live' | 'completed' | 'cancelled' {
+function getMatchCategory(m: Match): 'searching' | 'upcoming' | 'live' | 'completed' | 'cancelled' {
   if (m.status === 'cancelled') return 'cancelled';
+  // Its time ran out with no result. Not 'cancelled' (nobody called it off) and
+  // not 'live' -- the clock below would otherwise still read it as in progress.
+  if (m.status === 'expired') return 'completed';
   if (m.status === 'completed') return 'completed';
+  if (m.status === 'open') return 'searching';
 
   const scheduledMs = Date.parse(m.scheduled_at);
   const nowMs = Date.now();
@@ -66,40 +77,61 @@ function getMatchCategory(m: Match): 'upcoming' | 'live' | 'completed' | 'cancel
   return 'completed';
 }
 
-const DEFAULT_BADGE = { label: 'UPCOMING', bg: 'rgba(34, 197, 94, 0.14)', color: '#22C55E' };
+type Category = ReturnType<typeof getMatchCategory>;
 
-const STATUS_BADGE: Record<string, { label: string; bg: string; color: string }> = {
-  upcoming: DEFAULT_BADGE,
-  live: { label: '⚡ LIVE', bg: 'rgba(234, 179, 8, 0.20)', color: '#EAB308' },
-  completed: { label: 'COMPLETED', bg: 'rgba(255, 255, 255, 0.10)', color: '#9CA3AF' },
-  cancelled: { label: 'CANCELLED', bg: 'rgba(239, 68, 68, 0.15)', color: '#EF4444' },
+const STATUS_LABEL: Record<Category, string> = {
+  searching: 'SEARCHING OPPONENTS',
+  upcoming: 'UPCOMING',
+  live: 'LIVE',
+  completed: 'COMPLETED',
+  cancelled: 'CANCELLED',
 };
+
+/** Badge colours from the active palette, so both themes stay legible. */
+function statusTone(category: Category, M: MockPalette): { bg: string; color: string } {
+  if (category === 'live') return { bg: 'rgba(245, 158, 11, 0.16)', color: '#B45309' };
+  if (category === 'cancelled') return { bg: `${M.danger}1F`, color: M.danger };
+  if (category === 'completed') return { bg: M.cardHi, color: M.muted };
+  return { bg: M.chip, color: M.green };
+}
 
 function MatchCard({
   match,
   myRole,
   cancelling,
   onPress,
+  onOpenRadar,
   onCancel,
 }: {
   match: Match;
   myRole: 'creator' | 'player';
   cancelling?: boolean;
   onPress: () => void;
+  onOpenRadar?: (challengeId: string) => void;
   onCancel: (m: Match) => void;
 }): React.ReactNode {
   const M = useMock();
   const styles = useMemo(() => makeStyles(M), [M]);
   const category = getMatchCategory(match);
-  const badge = STATUS_BADGE[category] ?? DEFAULT_BADGE;
+  const badge = { ...statusTone(category, M), label: STATUS_LABEL[category] };
   const isCancelled = match.status === 'cancelled';
   const isCompleted = match.status === 'completed';
+  const isSearching = match.status === 'open';
+
+  const handleCardPress = () => {
+    if (isSearching && match.challenge_id && onOpenRadar) {
+      onOpenRadar(match.challenge_id);
+    } else {
+      onPress();
+    }
+  };
 
   return (
     <Pressable
-      onPress={onPress}
+      onPress={handleCardPress}
       style={({ pressed }) => [
         styles.card,
+        isSearching ? { borderColor: M.green } : null,
         { transform: [{ scale: pressed ? 0.99 : 1 }] },
         isCancelled ? styles.cardCancelled : null,
       ]}
@@ -110,7 +142,7 @@ function MatchCard({
         <View style={{ flex: 1, gap: 3 }}>
           <View style={styles.titleRow}>
             <AppText variant="heading" color={M.text} numberOfLines={1} style={{ fontSize: 16, flex: 1 }}>
-              {match.match_name || 'Match'}
+              {match.match_name || 'Game'}
             </AppText>
             <View style={[styles.badge, { backgroundColor: badge.bg }]}>
               <AppText variant="caption" color={badge.color} style={{ fontWeight: '800', fontSize: 10 }}>
@@ -119,7 +151,7 @@ function MatchCard({
             </View>
           </View>
           <AppText variant="caption" color={M.muted}>
-            {match.sport === 'box_cricket' ? '🏏 Box Cricket' : '🏸 Badminton'} · {match.total_slots} slots
+            {match.sport === 'box_cricket' ? 'Box Cricket' : 'Badminton'} · {match.total_slots} slots
             {myRole === 'creator' ? ' · (Organiser)' : ''}
           </AppText>
         </View>
@@ -141,15 +173,28 @@ function MatchCard({
       </View>
 
       <View style={styles.actionRow}>
-        <Pressable
-          onPress={onPress}
-          style={[styles.btn, styles.btnPrimary]}
-          accessibilityRole="button"
-        >
-          <AppText variant="caption" color={M.limeInk} style={{ fontWeight: '700' }}>
-            {isCompleted ? 'View Scorecard' : 'Open Match →'}
-          </AppText>
-        </Pressable>
+        {isSearching && match.challenge_id && onOpenRadar ? (
+          <Pressable
+            onPress={() => onOpenRadar(match.challenge_id as string)}
+            style={[styles.btn, styles.btnPrimary]}
+            accessibilityRole="button"
+          >
+            <IconBolt color={M.limeInk} size={14} />
+            <AppText variant="caption" color={M.limeInk} style={{ fontWeight: '800' }}>
+              View Live Radar
+            </AppText>
+          </Pressable>
+        ) : (
+          <Pressable
+            onPress={onPress}
+            style={[styles.btn, styles.btnPrimary]}
+            accessibilityRole="button"
+          >
+            <AppText variant="caption" color={M.limeInk} style={{ fontWeight: '700' }}>
+              {isCompleted ? 'View Scorecard' : isSearching ? 'View Game Details' : 'Open Game'}
+            </AppText>
+          </Pressable>
+        )}
 
         {myRole === 'creator' && !isCancelled && !isCompleted ? (
           <Pressable
@@ -183,32 +228,40 @@ function ChallengeSearchingCard({
   styles: ReturnType<typeof makeStyles>;
   onPress: () => void;
 }): React.ReactNode {
+  const isOutgoing = challenge.direction === 'outgoing';
   return (
     <Pressable
       onPress={onPress}
-      style={[styles.card, { borderColor: '#E8FF59', borderWidth: 1 }]}
+      style={({ pressed }) => [
+        styles.card,
+        {
+          borderColor: M.green,
+          backgroundColor: M.chip,
+          transform: [{ scale: pressed ? 0.99 : 1 }],
+        },
+      ]}
       accessibilityRole="button"
-      accessibilityLabel={`Active challenge: ${challenge.match_name}. Tap to view live radar.`}
+      accessibilityLabel={`Active challenge search: ${challenge.match_name}. Tap to view live radar.`}
     >
       <View style={styles.cardHeader}>
-        <View style={[styles.sportThumb, { backgroundColor: '#202028', alignItems: 'center', justifyContent: 'center' }]}>
-          <AppText style={{ fontSize: 18 }}>⚡</AppText>
+        <View style={[styles.sportThumb, styles.thumbIcon]}>
+          <IconBolt color={M.limeInk} size={22} />
         </View>
         <View style={{ flex: 1, gap: 3 }}>
           <View style={styles.titleRow}>
             <AppText variant="heading" color={M.text} numberOfLines={1} style={{ fontSize: 16, flex: 1 }}>
               {challenge.match_name || 'Team Challenge'}
             </AppText>
-            <View style={[styles.badge, { backgroundColor: '#202028' }]}>
-              <AppText variant="caption" color="#E8FF59" style={{ fontWeight: '800', fontSize: 10 }}>
-                {challenge.direction === 'outgoing' ? '⚡ LIVE RADAR' : '⚡ MATCH OFFER'}
+            <View style={[styles.badge, { backgroundColor: M.card }]}>
+              <AppText variant="caption" color={M.green} style={{ fontWeight: '800', fontSize: 10 }}>
+                {isOutgoing ? 'LIVE RADAR SEARCH' : 'GAME OFFER'}
               </AppText>
             </View>
           </View>
-          <AppText variant="caption" color={M.muted}>
-            {challenge.direction === 'outgoing'
-              ? 'Searching for opponents nearby…'
-              : 'Incoming match challenge awaiting your reply'}
+          <AppText variant="caption" color={M.green} style={{ fontWeight: '600' }}>
+            {isOutgoing
+              ? 'Actively scanning nearby teams on Radar…'
+              : 'Incoming game challenge awaiting your reply'}
           </AppText>
         </View>
       </View>
@@ -231,11 +284,11 @@ function ChallengeSearchingCard({
       </View>
 
       <View style={[styles.actionRow, { marginTop: S.xs }]}>
-        <View style={{ flex: 1 }} />
-        <View style={[styles.btn, styles.btnPrimary, { backgroundColor: '#E8FF59' }]}>
-          <AppText variant="caption" color="#000" style={{ fontWeight: '800' }}>
-            {challenge.direction === 'outgoing' ? 'View Live Radar →' : 'View Offers →'}
+        <View style={[styles.btn, styles.btnPrimary]}>
+          <AppText variant="caption" color={M.limeInk} style={{ fontWeight: '800' }}>
+            {isOutgoing ? 'Open Live Radar Scanner' : 'View Offers'}
           </AppText>
+          <IconArrowRight color={M.limeInk} size={14} />
         </View>
       </View>
     </Pressable>
@@ -282,12 +335,12 @@ export default function BookedMatchesScreen(): React.ReactNode {
   const onCancelMatch = useCallback(
     (m: Match) => {
       Alert.alert(
-        'Cancel this match?',
+        'Cancel this game?',
         `Are you sure you want to cancel "${m.match_name}"? All players will be notified.`,
         [
-          { text: 'Keep Match', style: 'cancel' },
+          { text: 'Keep Game', style: 'cancel' },
           {
-            text: 'Cancel Match',
+            text: 'Cancel Game',
             style: 'destructive',
             onPress: () => {
               setCancellingId(m.id);
@@ -327,18 +380,10 @@ export default function BookedMatchesScreen(): React.ReactNode {
 
       {/* Header */}
       <View style={styles.header}>
-        <Pressable
-          onPress={onBack}
-          hitSlop={10}
-          style={styles.backBtn}
-          accessibilityRole="button"
-          accessibilityLabel="Go back"
-        >
-          <IconBack color={M.text} />
-        </Pressable>
+        <RoundBack onPress={onBack} />
         <View style={styles.headerText}>
-          <AppText variant="heading" color={M.text}>
-            Booked & Scheduled Matches
+          <AppText variant="heading" color={M.text} numberOfLines={1} style={styles.headerTitle}>
+            Booked & Scheduled Games
           </AppText>
           <AppText variant="caption" color={M.muted}>
             {upcomingCount} upcoming fixture{upcomingCount === 1 ? '' : 's'}
@@ -348,63 +393,73 @@ export default function BookedMatchesScreen(): React.ReactNode {
           onPress={() => router.push('/match/create')}
           style={styles.createIconBtn}
           accessibilityRole="button"
-          accessibilityLabel="Create match"
+          accessibilityLabel="Create game"
         >
-          <IconPlus color={M.limeInk} size={20} />
+          <IconPlus color={M.limeInk} size={22} strokeWidth={2.4} />
         </Pressable>
       </View>
 
       {/* Tabs */}
-      <View style={styles.tabsRow}>
-        {TABS.map((t) => {
-          const isSelected = tab === t.key;
-          return (
-            <Pressable
-              key={t.key}
-              onPress={() => setTab(t.key)}
-              style={[styles.tabChip, isSelected ? styles.tabChipActive : null]}
-              accessibilityRole="button"
-            >
-              <AppText
-                variant="caption"
-                color={isSelected ? M.limeInk : M.muted}
-                style={{ fontWeight: isSelected ? '700' : '500' }}
+      <View>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.tabsRow}
+        >
+          {TABS.map((t) => {
+            const isSelected = tab === t.key;
+            return (
+              <Pressable
+                key={t.key}
+                onPress={() => setTab(t.key)}
+                style={[styles.tabChip, isSelected ? styles.tabChipActive : null]}
+                accessibilityRole="button"
+                accessibilityState={{ selected: isSelected }}
               >
-                {t.label}
-              </AppText>
-            </Pressable>
-          );
-        })}
+                <t.Icon color={isSelected ? M.limeInk : M.text} size={18} />
+                <AppText
+                  variant="caption"
+                  color={isSelected ? M.limeInk : M.text}
+                  style={{ fontSize: 14, fontWeight: isSelected ? '700' : '500' }}
+                >
+                  {t.label}
+                </AppText>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
       </View>
 
       {/* List / Empty State */}
       {bookedMatches.isLoading || challenges.isLoading ? (
         <View style={styles.centerBox}>
           <ActivityIndicator color={M.green} size="large" />
-          <AppText color={M.muted}>Loading scheduled matches…</AppText>
+          <AppText color={M.muted}>Loading scheduled games…</AppText>
         </View>
       ) : filteredList.length === 0 && !showOpenChallenges ? (
         <View style={styles.emptyBox}>
-          <View style={styles.emptyIconCircle}>
-            <IconCalendar color={M.green} size={32} />
-          </View>
-          <AppText variant="heading" color={M.text} center style={{ fontSize: 18 }}>
-            No {tab !== 'all' ? tab : ''} matches found
+          <StadiumBackdrop height={170} net={false} />
+          <CalendarArt size={230} />
+          <AppText variant="heading" color={M.text} center style={styles.emptyTitle}>
+            No {tab !== 'all' ? `${tab} ` : ''}matches found
           </AppText>
-          <AppText variant="body" color={M.muted} center style={{ maxWidth: 280 }}>
+          <AppText variant="body" color={M.muted} center style={{ maxWidth: 300 }}>
             {tab === 'upcoming'
-              ? 'You have no upcoming matches scheduled. Post a match or challenge a team!'
-              : 'Matches you participate in or organise will appear here.'}
+              ? 'You have no upcoming games scheduled. Post a game or challenge a team!'
+              : 'Games you participate in or organise will appear here.'}
           </AppText>
 
           <Pressable
             onPress={() => router.push('/match/create')}
             style={styles.emptyCta}
             accessibilityRole="button"
+            accessibilityLabel="Create a game"
           >
-            <AppText variant="label" color={M.limeInk}>
-              + Create a Match
+            <IconPlus color={M.limeInk} size={20} strokeWidth={2.4} />
+            <AppText variant="label" color={M.limeInk} style={{ fontSize: 16 }}>
+              Create a Game
             </AppText>
+            <IconArrowRight color={M.limeInk} size={20} />
           </Pressable>
         </View>
       ) : (
@@ -442,6 +497,12 @@ export default function BookedMatchesScreen(): React.ReactNode {
                 if (item.match.status === 'completed') router.push(`/match/${item.match.id}/result`);
                 else router.push(`/match/${item.match.id}`);
               }}
+              onOpenRadar={(challengeId) => {
+                router.push({
+                  pathname: '/match/create/searching',
+                  params: { challengeId },
+                });
+              }}
               onCancel={onCancelMatch}
             />
           )}
@@ -458,23 +519,18 @@ const makeStyles = (M: MockPalette) =>
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
-      paddingHorizontal: S.lg,
+      gap: S.sm,
+      paddingHorizontal: S.md,
       paddingVertical: S.sm,
       borderBottomWidth: 1,
       borderBottomColor: M.border,
     },
-    backBtn: {
+    headerText: { flex: 1, alignItems: 'center', minWidth: 0 },
+    headerTitle: { fontFamily: 'SpaceGrotesk_700Bold', fontWeight: '700', fontSize: 18 },
+    createIconBtn: {
       width: TOUCH,
       height: TOUCH,
-      alignItems: 'center',
-      justifyContent: 'center',
-      marginLeft: -S.sm,
-    },
-    headerText: { flex: 1, alignItems: 'center' },
-    createIconBtn: {
-      width: 36,
-      height: 36,
-      borderRadius: 18,
+      borderRadius: TOUCH / 2,
       backgroundColor: M.green,
       alignItems: 'center',
       justifyContent: 'center',
@@ -482,13 +538,15 @@ const makeStyles = (M: MockPalette) =>
 
     tabsRow: {
       flexDirection: 'row',
-      gap: S.xs,
-      paddingHorizontal: S.lg,
-      paddingVertical: S.sm,
+      gap: S.sm,
+      paddingHorizontal: S.md,
+      paddingVertical: S.sm + 4,
     },
     tabChip: {
-      flex: 1,
-      paddingVertical: S.xs + 2,
+      flexDirection: 'row',
+      gap: 6,
+      minHeight: TOUCH,
+      paddingHorizontal: S.md,
       borderRadius: R.pill,
       alignItems: 'center',
       justifyContent: 'center',
@@ -511,7 +569,7 @@ const makeStyles = (M: MockPalette) =>
     card: {
       backgroundColor: M.card,
       borderRadius: 20,
-      borderWidth: 1.5,
+      borderWidth: 1,
       borderColor: M.border,
       padding: S.md,
       gap: S.md,
@@ -531,6 +589,7 @@ const makeStyles = (M: MockPalette) =>
       borderRadius: 14,
       backgroundColor: M.cardHi,
     },
+    thumbIcon: { backgroundColor: M.green, alignItems: 'center', justifyContent: 'center' },
     titleRow: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -545,8 +604,8 @@ const makeStyles = (M: MockPalette) =>
 
     cardDetails: {
       gap: 6,
-      backgroundColor: M.bg,
-      padding: S.sm,
+      backgroundColor: M.cardHi,
+      padding: S.sm + 2,
       borderRadius: R.md,
     },
     detailRow: {
@@ -561,7 +620,9 @@ const makeStyles = (M: MockPalette) =>
       gap: S.sm,
     },
     btn: {
-      paddingVertical: 10,
+      flexDirection: 'row',
+      gap: 6,
+      minHeight: TOUCH,
       paddingHorizontal: S.md,
       borderRadius: R.pill,
       alignItems: 'center',
@@ -590,22 +651,20 @@ const makeStyles = (M: MockPalette) =>
       paddingHorizontal: S.xl,
       gap: S.md,
     },
-    emptyIconCircle: {
-      width: 72,
-      height: 72,
-      borderRadius: 36,
-      backgroundColor: M.card,
-      borderWidth: 1.5,
-      borderColor: M.border,
-      alignItems: 'center',
-      justifyContent: 'center',
-      marginBottom: S.xs,
-    },
+    emptyTitle: { fontFamily: 'SpaceGrotesk_700Bold', fontWeight: '700', fontSize: 22 },
     emptyCta: {
-      marginTop: S.sm,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: S.sm + 4,
+      marginTop: S.md,
+      minHeight: 58,
       paddingHorizontal: S.xl,
-      paddingVertical: S.sm + 2,
       borderRadius: R.pill,
       backgroundColor: M.green,
+      shadowColor: M.green,
+      shadowOffset: { width: 0, height: 6 },
+      shadowOpacity: 0.25,
+      shadowRadius: 12,
+      elevation: 6,
     },
   });

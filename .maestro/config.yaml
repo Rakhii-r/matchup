@@ -12,3 +12,5 @@ appId: com.asrdigi.matchup
 - runFlow: 04_live_radar.yaml
 - runFlow: 05_venues_directory.yaml
 - runFlow: 06_profile_and_theme.yaml
+- runFlow: 07_game_offers_deduplication.yaml
+- runFlow: 08_global_match_discovery.yaml

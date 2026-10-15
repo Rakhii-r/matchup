@@ -11,11 +11,11 @@ import type {
   NearbyOpenChallenge,
   OpenOffer,
 } from '@features/teams/domain/challengeSchema';
-import type { GameType } from '@shared/types/database.types';
 import {
   formatConflictWindow,
   parseScheduleConflict,
 } from '@shared/utils/scheduleConflict';
+import type { Sport } from '@shared/types/database.types';
 
 /**
  * The challenge RPCs signal every refusal with a stable token as the message,
@@ -30,6 +30,46 @@ const CHALLENGE_ERRORS: [token: string, code: AppErrorCode, message: string][] =
   ['OPPONENT_NOT_FOUND', 'not_found', 'No team found for that code.'],
   ['CHALLENGE_NOT_FOUND', 'not_found', 'That challenge no longer exists.'],
   ['SELF_CHALLENGE', 'validation', 'You cannot challenge your own team.'],
+  // A player cannot stand on both team sheets, so two squads that share one
+  // cannot be paired. The radar already hides them from each other; this is
+  // what a captain sees if they reach the pairing another way.
+  [
+    'SHARED_PLAYER',
+    'conflict',
+    'You share a player with that team, so the two squads cannot play each other.',
+  ],
+  // team_challenges_squad_check — the squad rule is enforced in the DB now, not
+  // only by the create screen's button.
+  //
+  // ORDER MATTERS: matching is `raw.includes(token)`, and the string
+  // 'OPPONENT_SQUAD_TOO_SMALL' contains 'SQUAD_TOO_SMALL'. Listed the other way
+  // round, an undersized OPPONENT would be reported as "Your squad is too
+  // small" — blaming the wrong team for the wrong thing.
+  [
+    'OPPONENT_SQUAD_TOO_SMALL',
+    'conflict',
+    'That team does not have enough players for this many a side yet.',
+  ],
+  ['SQUAD_TOO_SMALL', 'conflict', 'Your squad is too small for that many players a side. Add players first.'],
+  // Strict format matching (20260903090000). ORDER MATTERS for the same reason
+  // the squad tokens above are ordered: 'OPPONENT_FORMAT_MISMATCH' contains
+  // 'FORMAT_MISMATCH', so the opponent-specific token has to be tested first or
+  // a cross-format OPPONENT is reported as the user's own team being wrong.
+  [
+    'OPPONENT_FORMAT_MISMATCH',
+    'conflict',
+    'That team plays a different format. Teams can only play the same number a side.',
+  ],
+  [
+    'FORMAT_MISMATCH',
+    'conflict',
+    'That fixture is a different format from your team. You can only play teams of the same number a side.',
+  ],
+  // Raised by accept_open_challenge through set_match_lineup.
+  ['LINEUP_SIZE_MISMATCH', 'validation', 'Pick exactly the number of players this format needs.'],
+  ['LINEUP_DUPLICATE_PLAYER', 'validation', 'That player is already in the lineup.'],
+  ['LINEUP_NOT_A_MEMBER', 'validation', 'Everyone in the lineup has to be on your team.'],
+  ['LINEUP_MISSING_CAPTAIN', 'validation', 'You play in your own lineup — keep yourself selected.'],
   ['SPORT_MISMATCH', 'validation', 'That team plays a different sport.'],
   ['SCHEDULE_IN_PAST', 'validation', 'Pick a date and time in the future.'],
   ['TOO_MANY_PLAYERS', 'validation', 'Both squads together do not fit the slots you picked.'],
@@ -40,7 +80,7 @@ const CHALLENGE_ERRORS: [token: string, code: AppErrorCode, message: string][] =
   ['CHALLENGE_ALREADY_TAKEN', 'conflict', 'Another team took this fixture first.'],
   ['NOT_OFFERED', 'forbidden', 'This fixture was not offered to your team.'],
   ['TEAM_NOT_FOUND', 'not_found', 'That team no longer exists.'],
-  ['INVALID_SLOTS', 'validation', 'Pick how many players the match needs.'],
+  ['INVALID_SLOTS', 'validation', 'Pick how many players the game needs.'],
   ['NO_OPPONENT', 'validation', 'That challenge has no opponent yet.'],
 ];
 
@@ -72,7 +112,7 @@ function challengeError(error: unknown): AppError {
   if (raw.includes('CHALLENGE_CANDIDATES_STATUS_CHECK') || raw.includes('STATUS_CHECK')) {
     return new AppError(
       'validation',
-      'Please apply the latest database migration for interactive match requests.',
+      'Please apply the latest database migration for interactive game requests.',
       error,
     );
   }
@@ -140,8 +180,6 @@ export const challengeRepository = {
     totalSlots: number;
     message?: string | null;
     radiusM: number;
-    /** Omit to take the RPC's 'friendly' default. */
-    gameType?: GameType | null;
     /** ISO instant, or null to leave the finish time open. */
     endTime?: string | null;
     lat?: number | null;
@@ -160,9 +198,6 @@ export const challengeRepository = {
       in_lat: input.lat ?? null,
       in_lng: input.lng ?? null,
       in_venue_id: input.venueId ?? null,
-      // Left out entirely when unset so the RPC's own default applies, rather
-      // than the client asserting a value it was never given.
-      ...(input.gameType ? { in_game_type: input.gameType } : {}),
     });
     if (error) throw challengeError(error);
     if (!data) throw new AppError('unknown', 'Could not post the challenge.');
@@ -185,17 +220,28 @@ export const challengeRepository = {
   /**
    * Opponent teams browse open fixtures looking for opponents nearby.
    */
+  /**
+   * Open fixtures near me, LOCKED to one format.
+   *
+   * `teamSize` is players per side and is not optional in spirit even though
+   * the type allows null: `list_open_challenges_nearby` returns nothing at all
+   * for a null, because "I have not told you my format" is not a wildcard. The
+   * caller passes the active team's declared format and renders a
+   * format-specific empty state when there is nothing at that size.
+   */
   async listNearbyOpenChallenges(input?: {
     lat?: number | null;
     lng?: number | null;
-    radiusM?: number;
-    sport?: string | null;
+    radiusM?: number | null;
+    sport?: Sport | string | null;
+    teamSize?: number | null;
   }): Promise<NearbyOpenChallenge[]> {
     const { data, error } = await supabase.rpc('list_open_challenges_nearby', {
       in_lat: input?.lat ?? null,
       in_lng: input?.lng ?? null,
-      in_radius_m: input?.radiusM ?? 50000,
+      in_radius_m: (input?.radiusM ?? null) as unknown as number,
       in_sport: input?.sport ?? null,
+      in_team_size: input?.teamSize ?? null,
     });
     if (error) throw challengeError(error);
     return (data ?? []) as NearbyOpenChallenge[];
@@ -205,10 +251,20 @@ export const challengeRepository = {
    * Accept an open fixture (called either by the Host accepting an applicant team,
    * or by an offered team accepting an offer).
    */
-  async acceptOpen(challengeId: string, teamId: string): Promise<Challenge> {
+  /**
+   * Accept a fixture AND name the squad, in one transaction.
+   *
+   * `lineup` is the accepting captain's own team, exactly the format size and
+   * including themselves. It is not optional: the server refuses a fixture with
+   * no named squad, and it validates the lineup before building the match, so a
+   * bad selection rolls the acceptance back with it rather than leaving a
+   * confirmed fixture nobody is playing in.
+   */
+  async acceptOpen(challengeId: string, teamId: string, lineup: string[]): Promise<Challenge> {
     const { data, error } = await supabase.rpc('accept_open_challenge', {
       in_challenge_id: challengeId,
       in_team_id: teamId,
+      in_lineup: lineup,
     });
     if (error) throw challengeError(error);
     if (!data) throw new AppError('unknown', 'Could not accept the fixture.');
@@ -257,7 +313,20 @@ export const challengeRepository = {
       .order('created_at', { ascending: false })
       .limit(50);
     if (error) throw challengeError(error);
-    return (data ?? []) as unknown as OpenOffer[];
+
+    // Deduplicate by challenge_id so a user receives exactly ONE offer card per fixture
+    const rawOffers = (data ?? []) as unknown as OpenOffer[];
+    const dedupedMap = new Map<string, OpenOffer>();
+    for (const offer of rawOffers) {
+      if (!offer.challenge_id || !offer.challenge || offer.challenge.status !== 'open') continue;
+      const existing = dedupedMap.get(offer.challenge_id);
+      if (!existing) {
+        dedupedMap.set(offer.challenge_id, offer);
+      } else if (existing.status !== 'interested' && offer.status === 'interested') {
+        dedupedMap.set(offer.challenge_id, offer);
+      }
+    }
+    return Array.from(dedupedMap.values());
   },
 
   /** Who the matcher offered a challenge to. Visible to the poster's squad. */
@@ -266,7 +335,8 @@ export const challengeRepository = {
       .from('challenge_candidates')
       .select('*, team:teams(name, sport)')
       .eq('challenge_id', challengeId)
-      .order('rank', { ascending: true });
+      .order('rank', { ascending: true })
+      .limit(50);
     if (error) throw challengeError(error);
     return (data ?? []) as unknown as ChallengeCandidateWithTeam[];
   },

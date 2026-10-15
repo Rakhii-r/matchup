@@ -38,7 +38,7 @@ type DemoSeed = {
 const SEEDS: DemoSeed[] = [
   {
     id: 'demo-1',
-    name: 'Box Cricket Evening Match',
+    name: 'Box Cricket Evening Game',
     sport: 'box_cricket',
     venue: 'BoxOut Cricket Turf, Kukatpally',
     when: at(0, 19, 0),

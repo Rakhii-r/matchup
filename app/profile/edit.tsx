@@ -1,5 +1,14 @@
 import { useMemo, useState } from 'react';
-import { Alert, Image, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  Image,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  TextInput,
+  View,
+} from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -8,7 +17,10 @@ import { Stack, useRouter } from 'expo-router';
 
 import { useAuthStore } from '@core/auth/authStore';
 import { getCurrentCoords, type Coords } from '@core/location/location';
-import { useUpdateProfile } from '@features/profile/presentation/useUpdateProfile';
+import {
+  useUpdateAvatar,
+  useUpdateProfile,
+} from '@features/profile/presentation/useUpdateProfile';
 import { useActiveSports } from '@features/sports/presentation/useSports';
 import type { Sport } from '@shared/types/database.types';
 import { R, S, useMock, type MockPalette } from '@shared/theme/mockTheme';
@@ -28,8 +40,10 @@ export default function EditProfileScreen(): React.ReactNode {
   const [areaName, setAreaName] = useState(profile?.area_name ?? '');
   const [sports, setSports] = useState<Sport[]>(profile?.sport_pref ?? []);
   const [avatarUri, setAvatarUri] = useState<string | null>(profile?.avatar_url ?? null);
-  const [avatarBase64, setAvatarBase64] = useState<string | null>(null);
-  const [removeAvatar, setRemoveAvatar] = useState(false);
+  // The photo saves itself the moment it is picked (see useUpdateAvatar), so
+  // it is no longer part of what "Save changes" submits.
+  const photo = useUpdateAvatar();
+  const [photoNotice, setPhotoNotice] = useState<string | null>(null);
   // Coords captured during THIS visit only. Left null, the submit below sends
   // `undefined` so the stored home_lat/home_lng are preserved rather than wiped.
   const [coords, setCoords] = useState<Coords | null>(null);
@@ -58,7 +72,43 @@ export default function EditProfileScreen(): React.ReactNode {
     }
   };
 
-  const pickPhoto = async (): Promise<void> => { const permission=await ImagePicker.requestMediaLibraryPermissionsAsync(); if(!permission.granted) return; const result=await ImagePicker.launchImageLibraryAsync({mediaTypes:['images'],allowsEditing:true,aspect:[1,1],quality:0.7,base64:true}); const asset=result.canceled?null:result.assets[0];if(asset?.base64){setAvatarUri(asset.uri);setAvatarBase64(asset.base64);setRemoveAvatar(false);} };
+  const pickPhoto = async (): Promise<void> => {
+    if (photo.busy) return;
+    setPhotoNotice(null);
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      setPhotoNotice('Allow photo access in your phone settings to add a profile photo.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.7,
+      base64: true,
+    });
+    const asset = result.canceled ? null : result.assets[0];
+    if (!asset) return;
+    if (!asset.base64) {
+      setPhotoNotice('That image could not be read. Please choose another one.');
+      return;
+    }
+    // Show it straight away, save it straight away, and put the old one back
+    // if the save fails -- the preview must never claim more than the server has.
+    const previous = avatarUri;
+    setAvatarUri(asset.uri);
+    const ok = await photo.save(asset.base64);
+    if (!ok) setAvatarUri(previous);
+  };
+
+  const removePhoto = async (): Promise<void> => {
+    if (photo.busy) return;
+    setPhotoNotice(null);
+    const previous = avatarUri;
+    setAvatarUri(null);
+    const ok = await photo.save(null);
+    if (!ok) setAvatarUri(previous);
+  };
 
   const toggleSport = (sport: Sport): void => {
     setSports((prev) => (prev.includes(sport) ? prev.filter((s) => s !== sport) : [...prev, sport]));
@@ -69,8 +119,6 @@ export default function EditProfileScreen(): React.ReactNode {
       fullName,
       areaName,
       sportPref: sports,
-      avatarBase64,
-      removeAvatar,
       // `undefined` when nothing was captured this visit — the repository only
       // writes these columns when they are not undefined, so the saved
       // coordinates survive an edit that never touched location.
@@ -106,7 +154,56 @@ export default function EditProfileScreen(): React.ReactNode {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        <View style={styles.photoArea}><Pressable accessibilityRole="button" accessibilityLabel={avatarUri?'Change profile photo':'Add profile photo'} hitSlop={12} onPress={()=>void pickPhoto()} style={styles.photoPicker}><View style={styles.avatar}>{avatarUri?<Image source={{uri:avatarUri}} style={styles.avatarImage}/>:<AppText variant="heading" color={M.faint}>+</AppText>}</View><AppText variant="label" color={M.green}>{avatarUri?'Change photo':'Add profile photo'}</AppText></Pressable>{avatarUri?<Pressable hitSlop={12} onPress={()=>Alert.alert('Remove profile photo?','This will remove your current profile picture.',[{text:'Cancel',style:'cancel'},{text:'Remove',style:'destructive',onPress:()=>{setAvatarUri(null);setAvatarBase64(null);setRemoveAvatar(true);}}])}><AppText variant="caption" color={M.danger}>Remove photo</AppText></Pressable>:null}</View>
+        <View style={styles.photoArea}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={avatarUri ? 'Change profile photo' : 'Add profile photo'}
+            accessibilityState={{ busy: photo.busy }}
+            hitSlop={12}
+            disabled={photo.busy}
+            onPress={() => void pickPhoto()}
+            style={styles.photoPicker}
+          >
+            <View style={styles.avatar}>
+              {avatarUri ? (
+                <Image source={{ uri: avatarUri }} style={styles.avatarImage} />
+              ) : (
+                <AppText variant="heading" color={M.faint}>
+                  +
+                </AppText>
+              )}
+              {photo.busy ? (
+                <View style={styles.avatarBusy}>
+                  <ActivityIndicator color="#FFFFFF" />
+                </View>
+              ) : null}
+            </View>
+            <AppText variant="label" color={M.green}>
+              {photo.busy ? 'Saving photo…' : avatarUri ? 'Change photo' : 'Add profile photo'}
+            </AppText>
+          </Pressable>
+          {avatarUri && !photo.busy ? (
+            <Pressable
+              hitSlop={12}
+              accessibilityRole="button"
+              onPress={() =>
+                Alert.alert('Remove profile photo?', 'This will remove your current profile picture.', [
+                  { text: 'Cancel', style: 'cancel' },
+                  { text: 'Remove', style: 'destructive', onPress: () => void removePhoto() },
+                ])
+              }
+            >
+              <AppText variant="caption" color={M.danger}>
+                Remove photo
+              </AppText>
+            </Pressable>
+          ) : null}
+          {(photoNotice ?? photo.error) ? (
+            <AppText variant="caption" color={M.danger} center>
+              {photoNotice ?? photo.error}
+            </AppText>
+          ) : null}
+        </View>
         {/* Name */}
         <AppText variant="label" color={M.muted} style={styles.fieldLabel}>
           Name
@@ -145,11 +242,11 @@ export default function EditProfileScreen(): React.ReactNode {
             </AppText>
           ) : hasStoredCoords ? (
             <AppText variant="caption" color={M.green}>
-              Location set — nearby matches will work.
+              Location set — nearby games will work.
             </AppText>
           ) : (
             <AppText variant="caption" color={M.danger}>
-              No location saved. Nearby matches and players can&apos;t be found until you capture
+              No location saved. Nearby games and players can&apos;t be found until you capture
               your location from this device.
             </AppText>
           )}
@@ -277,6 +374,7 @@ const makeStyles = (M: MockPalette) => StyleSheet.create({
   photoPicker:{alignItems:'center',gap:S.sm,padding:S.sm},
   avatar:{width:96,height:96,borderRadius:48,overflow:'hidden',alignItems:'center',justifyContent:'center',backgroundColor:M.card,borderWidth:1,borderColor:M.border},
   avatarImage:{width:'100%',height:'100%'},
+  avatarBusy:{position:'absolute',top:0,right:0,bottom:0,left:0,alignItems:'center',justifyContent:'center',backgroundColor:'rgba(0,0,0,0.45)'},
   fieldLabel: { marginBottom: S.sm, fontSize: 14 },
   input: {
     backgroundColor: M.card,

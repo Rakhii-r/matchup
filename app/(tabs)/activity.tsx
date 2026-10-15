@@ -21,6 +21,7 @@ import {
 } from '@features/dashboard/presentation/useDashboard';
 import type { PendingAction } from '@features/dashboard/data/dashboardRepository';
 import { R, S, useMock, type MockPalette } from '@shared/theme/mockTheme';
+import { useTabContentPadding } from '@shared/theme/responsive';
 import { AppText } from '@shared/ui/AppText';
 
 const URGENCY_DOT: Record<PendingAction['urgency'], keyof MockPalette> = {
@@ -42,6 +43,9 @@ function timeAgo(iso: string): string {
 
 export default function ActivityScreen(): React.ReactNode {
   const M = useMock();
+  // Reserve the tab bar plus the device's bottom inset, or the last card in
+  // this list sits underneath the bar.
+  const tabContentPadding = useTabContentPadding();
   const styles = useMemo(() => makeStyles(M), [M]);
   const router = useRouter();
 
@@ -60,7 +64,7 @@ export default function ActivityScreen(): React.ReactNode {
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <ScrollView
-        contentContainerStyle={styles.scroll}
+        contentContainerStyle={[styles.scroll, { paddingBottom: tabContentPadding }]}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={M.green} />
         }
@@ -77,7 +81,7 @@ export default function ActivityScreen(): React.ReactNode {
               Nothing needs you right now
             </AppText>
             <AppText variant="caption" color={M.muted}>
-              Invites, challenges and match reminders will appear here.
+              Invites, challenges and game reminders will appear here.
             </AppText>
           </View>
         ) : null}

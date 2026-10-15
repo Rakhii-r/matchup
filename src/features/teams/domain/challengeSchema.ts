@@ -1,6 +1,5 @@
 import { z } from 'zod';
 
-import { GameTypeEnum } from '@features/matches/domain/matchSchema';
 import type { CandidateStatus, ChallengeStatus, Database } from '@shared/types/database.types';
 
 export type Challenge = Database['public']['Tables']['team_challenges']['Row'];
@@ -15,7 +14,7 @@ export const CreateChallengeSchema = z.object({
     .trim()
     .toUpperCase()
     .regex(/^[A-Z0-9]{6}$/, 'Enter the opponent’s 6-character code'),
-  matchName: z.string().trim().min(2, 'Name the match').max(80),
+  matchName: z.string().trim().min(2, 'Name the game').max(80),
   venueId: z.string().uuid('Pick a venue'),
   dayOffset: z.number().int().min(0).max(13),
   timeHHmm: z.string().regex(/^([01]\d|2[0-3]):([0-5]\d)$/, 'Pick a time'),
@@ -41,7 +40,7 @@ export const CHALLENGE_STATUS_LABEL: Record<ChallengeStatus, string> = {
  * how far to look.
  */
 export const PostOpenChallengeSchema = z.object({
-  matchName: z.string().trim().min(2, 'Name the match').max(80),
+  matchName: z.string().trim().min(2, 'Name the game').max(80),
   areaName: z.string().trim().min(2, 'Enter an area name').max(100),
   dayOffset: z.number().int().min(0).max(13),
   timeHHmm: z.string().regex(/^([01]\d|2[0-3]):([0-5]\d)$/, 'Pick a time'),
@@ -50,15 +49,11 @@ export const PostOpenChallengeSchema = z.object({
   /** Metres. 25 km default covers a metro; 5 km is one neighbourhood. */
   radiusM: z.number().int().min(1000).max(50000).default(25000),
   /**
-   * Added with the create-match wizard. Both optional so the older post-open
-   * screen keeps compiling and keeps its behaviour — the RPC defaults
-   * in_game_type to 'friendly' and in_end_time to null.
+   * Required, same as CreateOpenMatchSchema: the booked slot bounds the whole
+   * session. `finalise_challenge` copies it onto the match it creates, so a
+   * challenge posted without one produces a match that can never be limited.
    */
-  gameType: GameTypeEnum.optional(),
-  endTimeHHmm: z
-    .string()
-    .regex(/^([01]\d|2[0-3]):([0-5]\d)$/, 'Pick an end time')
-    .optional(),
+  endTimeHHmm: z.string().regex(/^([01]\d|2[0-3]):([0-5]\d)$/, 'Pick when you are free'),
   lat: z.number().optional(),
   lng: z.number().optional(),
   venueId: z.string().uuid().optional(),
@@ -118,7 +113,7 @@ export interface NearbyOpenChallenge {
   from_team_logo: string | null;
   sport: string;
   venue_id: string | null;
-  venue_name: string;
+  venue_name: string | null;
   area_name: string;
   scheduled_at: string;
   total_slots: number;

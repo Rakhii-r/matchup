@@ -2,13 +2,11 @@ import { useState, useMemo } from 'react';
 import {
   View,
   TextInput,
-  Pressable,
   StyleSheet,
   Platform,
   KeyboardAvoidingView,
   ScrollView,
   ImageBackground,
-  Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -19,8 +17,8 @@ import { radius, spacing, typography, type AppColors } from '@shared/theme';
 import { useTheme } from '@shared/theme/ThemeContext';
 import { AppLogo } from '@shared/ui/AppLogo';
 import { AppText } from '@shared/ui/AppText';
+import { PressableScale } from '@shared/ui/PressableScale';
 
-const { height: SCREEN_H } = Dimensions.get('window');
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const STADIUM_BG = require('../../assets/images/login-screen.png') as number;
@@ -90,7 +88,7 @@ export default function LoginScreen(): React.ReactNode {
               color="rgba(255,255,255,0.65)"
               style={{ marginBottom: spacing.lg }}
             >
-              Enter your mobile number to find nearby players and book matches.
+              Enter your mobile number to find nearby players and book games.
             </AppText>
 
             {/* Phone input — dark glass style */}
@@ -130,7 +128,7 @@ export default function LoginScreen(): React.ReactNode {
             </AppText>
 
             {/* CTA */}
-            <Pressable
+            <PressableScale
               onPress={onContinue}
               disabled={loading}
               style={({ pressed }) => [
@@ -148,7 +146,7 @@ export default function LoginScreen(): React.ReactNode {
                   {loading ? 'Sending code…' : 'Send OTP  →'}
                 </AppText>
               </LinearGradient>
-            </Pressable>
+            </PressableScale>
 
             <View style={styles.footer}>
               <AppText variant="caption" color="rgba(255,255,255,0.45)" center>
@@ -173,7 +171,14 @@ export default function LoginScreen(): React.ReactNode {
 const makeStyles = (colors: AppColors) =>
   StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#050C19' },
-  bg: { flex: 1, minHeight: SCREEN_H },
+  /*
+    `flex: 1` already fills the scroll viewport. The `minHeight: SCREEN_H` that
+    used to sit beside it came from `Dimensions.get('window')` read ONCE at
+    module load, so it froze the launch-time height: wrong after a rotation,
+    wrong in split-screen, and wrong on a foldable that changes size while the
+    app is running. Removing it costs nothing and fixes all three.
+  */
+  bg: { flex: 1 },
   kav: { flex: 1 },
   scroll: {
     flexGrow: 1,
@@ -185,7 +190,7 @@ const makeStyles = (colors: AppColors) =>
   phoneRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.sm },
   prefix: {
     width: 60,
-    height: 52,
+    minHeight: 52,
     borderRadius: radius.md,
     borderWidth: 1,
     alignItems: 'center',
@@ -193,7 +198,7 @@ const makeStyles = (colors: AppColors) =>
   },
   phoneInput: {
     flex: 1,
-    height: 52,
+    minHeight: 52,
     borderRadius: radius.md,
     borderWidth: 1,
     paddingHorizontal: spacing.md,

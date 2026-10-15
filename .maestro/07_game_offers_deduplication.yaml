@@ -1,0 +1,37 @@
+appId: com.asrdigi.matchup
+---
+# Flow 7: Game Offers Single Card Deduplication & Management
+# Tests user-level offer deduplication by challenge_id, status transitions, and clean actions
+
+- launchApp
+
+# 1. Navigate to Teams Tab
+- tapOn: "Teams"
+- assertVisible: "Your squads"
+
+# 2. Open Game Offers Screen
+- tapOn: "Game offers"
+- assertVisible: "Game offers"
+
+# 3. Verify Single Card per Fixture & Status
+- assertVisible: ".*vs.*|.*Challenge.*|.*Match.*|No offers right now"
+
+# 4. If an offer card is visible, test details & actions
+- runFlow:
+    when:
+      visible: "Send Request"
+    commands:
+      # Send match request
+      - tapOn: "Send Request"
+      - assertVisible: "Request Sent!.*|.*Waiting for opponent.*|Game Request.*"
+      # Verify status updates without generating duplicate cards
+      - assertVisible: ".*Waiting for opponent.*"
+
+# 5. Verify Decline Flow
+- runFlow:
+    when:
+      visible: "Decline|Withdraw Request"
+    commands:
+      - tapOn: "Decline|Withdraw Request"
+      - assertVisible: "Decline offer\\?|Withdraw request\\?"
+      - tapOn: "Cancel"

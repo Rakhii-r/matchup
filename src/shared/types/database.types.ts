@@ -8,7 +8,12 @@
  */
 
 export type Sport = 'box_cricket' | 'badminton';
-export type MatchStatus = 'open' | 'locked' | 'completed' | 'cancelled';
+/**
+ * 'expired' — the game's time passed and expire_stale_matches() closed it
+ * (20260901_expire_stale_matches). Distinct from 'cancelled', which means a
+ * person called it off; nothing was called off here, the slot simply ran out.
+ */
+export type MatchStatus = 'open' | 'locked' | 'completed' | 'cancelled' | 'expired';
 // 'invited' — the app put you on a sheet because your squad was booked into a
 // fixture; you have not answered yet. Distinct from 'approved', which means an
 // organiser accepted a request you made. Only 'confirmed' counts toward
@@ -29,7 +34,7 @@ export type MatchType = 'team_vs_team' | 'open';
 // Why this person is on the sheet. Display metadata only: every authority check
 // reads matches.creator_id, never this.
 export type MatchPlayerRole = 'creator' | 'player';
-export type TeamRole = 'owner' | 'vice_captain' | 'member';
+export type TeamRole = 'owner' | 'member';
 // 'open'    — posted with no addressee; the matcher offers it to ranked teams.
 // 'expired' — an open challenge nobody accepted before its start time.
 export type ChallengeStatus =
@@ -81,6 +86,38 @@ type Timestamped = { created_at: string };
 export interface Database {
   public: {
     Tables: {
+      captain_chat_messages: {
+        Row: {
+          id: string;
+          challenge_id: string | null;
+          match_id: string | null;
+          sender_id: string;
+          recipient_id: string;
+          content: string;
+          is_read: boolean;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          challenge_id?: string | null;
+          match_id?: string | null;
+          sender_id: string;
+          recipient_id: string;
+          content: string;
+          is_read?: boolean;
+          created_at?: string;
+        };
+        Update: {
+          challenge_id?: string | null;
+          match_id?: string | null;
+          sender_id?: string;
+          recipient_id?: string;
+          content?: string;
+          is_read?: boolean;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
       sports: {
         Row: { id: string; sport: Sport; name: string; is_active: boolean; created_at: string; updated_at: string };
         Insert: { id?: string; sport: Sport; name: string; is_active?: boolean; created_at?: string; updated_at?: string };
@@ -101,6 +138,12 @@ export interface Database {
           is_active: boolean;
           created_at: string;
           updated_at: string;
+          /**
+           * Push mute switches, keyed by GROUP not by kind (see notif_group in
+           * 20260831174915). An absent key means enabled -- only an explicit
+           * false mutes -- so an empty object is every notification on.
+           */
+          notif_prefs: Record<string, boolean>;
         };
         Insert: {
           id: string;
@@ -112,8 +155,24 @@ export interface Database {
           home_lng?: number | null;
           avatar_url?: string | null;
           is_active?: boolean;
+          notif_prefs?: Record<string, boolean>;
         };
         Update: Partial<Database['public']['Tables']['profiles']['Insert']>;
+        Relationships: [];
+      };
+      team_join_requests: {
+        Row: {
+          id: string;
+          team_id: string;
+          user_id: string;
+          status: 'pending' | 'accepted' | 'declined' | 'withdrawn';
+          message: string | null;
+          created_at: string;
+          decided_at: string | null;
+          decided_by: string | null;
+        };
+        Insert: { team_id: string; user_id: string; message?: string | null };
+        Update: Partial<Database['public']['Tables']['team_join_requests']['Insert']>;
         Relationships: [];
       };
       venues: {
@@ -135,6 +194,16 @@ export interface Database {
           rating_count: number;
           price_per_hour: number | null;
           facilities: string[];
+          // Added 30 Aug 2026. The picker (nearby_venues) returns 'approved'
+          // rows only; captain suggestions land 'pending'; the out-of-city seed
+          // rows and the lat/lng 0,0 row are 'hidden' rather than deleted,
+          // because matches_venue_id_fkey is ON DELETE SET NULL.
+          status: 'approved' | 'pending' | 'hidden';
+          suggested_by: string | null;
+          operating_hours_start: string;
+          operating_hours_end: string;
+          slot_duration_minutes: number;
+          courts_count: number;
         };
         Insert: {
           name: string;
@@ -150,9 +219,69 @@ export interface Database {
           rating_count?: number;
           price_per_hour?: number | null;
           facilities?: string[];
+          status?: 'approved' | 'pending' | 'hidden';
+          suggested_by?: string | null;
+          operating_hours_start?: string;
+          operating_hours_end?: string;
+          slot_duration_minutes?: number;
+          courts_count?: number;
         };
         Update: Partial<Database['public']['Tables']['venues']['Insert']>;
         Relationships: [];
+      };
+      venue_bookings: {
+        Row: {
+          id: string;
+          venue_id: string;
+          court_number: number;
+          user_id: string;
+          start_time: string;
+          end_time: string;
+          status: 'confirmed' | 'cancelled';
+          match_id: string | null;
+          notes: string | null;
+          created_at: string;
+          updated_at: string;
+          cancelled_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          venue_id: string;
+          court_number: number;
+          user_id?: string;
+          start_time: string;
+          end_time: string;
+          status?: 'confirmed' | 'cancelled';
+          match_id?: string | null;
+          notes?: string | null;
+          created_at?: string;
+          updated_at?: string;
+          cancelled_at?: string | null;
+        };
+        Update: Partial<Database['public']['Tables']['venue_bookings']['Insert']>;
+        Relationships: [
+          {
+            foreignKeyName: "venue_bookings_venue_id_fkey";
+            columns: ["venue_id"];
+            isOneToOne: false;
+            referencedRelation: "venues";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "venue_bookings_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "venue_bookings_match_id_fkey";
+            columns: ["match_id"];
+            isOneToOne: false;
+            referencedRelation: "matches";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       matches: {
         Row: {
@@ -231,6 +360,31 @@ export interface Database {
           filled_slots?: number;
           missing_count?: number;
         };
+        Relationships: [];
+      };
+      /**
+       * One innings of a scored match. Totals are maintained by the
+       * `sync_innings_totals` trigger from `deliveries` and are never written
+       * by hand. Read-only from the client: every write goes through an RPC
+       * (`start_innings`, `record_delivery`, `end_innings`).
+       */
+      innings: {
+        Row: Timestamped & {
+          id: string;
+          match_id: string;
+          number: 1 | 2;
+          batting_team_id: string;
+          bowling_team_id: string;
+          /** Innings 2 only. Runs needed to WIN (first-innings total + 1). */
+          target: number | null;
+          status: 'in_progress' | 'completed';
+          runs: number;
+          wickets: number;
+          legal_balls: number;
+          ended_at: string | null;
+        };
+        Insert: never;
+        Update: never;
         Relationships: [];
       };
       match_players: {
@@ -392,6 +546,16 @@ export interface Database {
           description: string | null;
           logo_url: string | null;
           home_ground: string | null;
+          /**
+           * The team's FORMAT in players per side: 4 means "we are a 4 v 4
+           * side". Re-purposed from "recruiting target" in
+           * 20260903090000_squad_only_matchmaking.sql.
+           *
+           * NULL is not a wildcard — it means the team has not declared a
+           * format and is out of matchmaking in both directions: the radar
+           * cannot rank it and `list_open_challenges_nearby` shows it nothing.
+           */
+          target_size: number | null;
           created_at: string;
         };
         Insert: {
@@ -400,6 +564,10 @@ export interface Database {
           sport: Sport;
           owner_id: string;
           invite_code: string;
+          target_size?: number | null;
+          description?: string | null;
+          logo_url?: string | null;
+          home_ground?: string | null;
           created_at?: string;
         };
         Update: { name?: string; sport?: Sport; description?: string | null; logo_url?: string | null; home_ground?: string | null };
@@ -500,6 +668,43 @@ export interface Database {
           in_sport?: Sport | null;
         };
         Returns: Database['public']['Tables']['matches']['Row'][];
+      };
+      /**
+       * Venues near a point, for the area-scoped venue picker. Hand-written to
+       * match the RETURNS TABLE in 20260827120000_nearby_venues.sql — this file
+       * is not generated, so the two are kept in step by hand.
+       *
+       * Not `venues.Row` + distance: the RPC returns a flat RETURNS TABLE whose
+       * column set is the venue columns minus `location` and `created_by` /
+       * `created_at`. Writing it out is what stops it silently drifting.
+       */
+      nearby_venues: {
+        Args: {
+          in_lat: number;
+          in_lng: number;
+          in_radius_m?: number;
+          in_sport?: Sport | null;
+        };
+        Returns: {
+          id: string;
+          name: string;
+          address: string | null;
+          lat: number;
+          lng: number;
+          sport_types: Sport[];
+          phone: string | null;
+          confirm_note: string;
+          image_url: string | null;
+          rating: number | null;
+          rating_count: number;
+          price_per_hour: number | null;
+          facilities: string[];
+          distance_m: number;
+          operating_hours_start: string;
+          operating_hours_end: string;
+          slot_duration_minutes: number;
+          courts_count: number;
+        }[];
       };
       nearby_available: {
         Args: {
@@ -615,8 +820,33 @@ export interface Database {
         Returns: Database['public']['Tables']['team_challenges']['Row'];
       };
       accept_open_challenge: {
-        Args: { in_challenge_id: string; in_team_id: string };
+        Args: {
+          in_challenge_id: string;
+          in_team_id: string;
+          /**
+           * The ACCEPTING captain's squad, exactly the format size and
+           * including themselves. Required: the two-argument overload was
+           * dropped in 20260907160000, because confirming a fixture with no
+           * named squad is the behaviour that migration replaced.
+           *
+           * Note this is the caller's OWN team's lineup, which is not always
+           * `in_team_id` — a host accepting an applicant names `from_team_id`.
+           * The RPC resolves that itself.
+           */
+          in_lineup: string[];
+        };
         Returns: Database['public']['Tables']['team_challenges']['Row'];
+      };
+      /**
+       * Replace one team's squad for a match. A "lineup" is the set of
+       * `match_players` rows for that team on that match — there is no separate
+       * lineup table. Enforces exact format size, roster membership, no
+       * duplicates and the captain's own inclusion, and notifies only the
+       * players it seats.
+       */
+      set_match_lineup: {
+        Args: { in_match_id: string; in_team_id: string; in_user_ids: string[] };
+        Returns: Database['public']['Tables']['match_players']['Row'][];
       };
       respond_to_match_invite: {
         Args: { in_match_id: string; in_accept: boolean };
@@ -690,14 +920,32 @@ export interface Database {
       // returned, which read as undefined at runtime with no type error.
       get_team_overview: {
         Args: { in_team_id: string };
-        Returns: { id: string; name: string; sport: Sport; invite_code: string; created_at: string; description: string | null; logo_url: string | null; home_ground: string | null; owner_id: string; captain_name: string | null; captain_avatar: string | null; player_count: number; my_role: TeamRole | null; i_am_owner: boolean }[];
+        Returns: { id: string; name: string; sport: Sport; invite_code: string; created_at: string; description: string | null; logo_url: string | null; home_ground: string | null; owner_id: string; captain_name: string | null; captain_avatar: string | null; player_count: number; my_role: TeamRole | null; i_am_owner: boolean; target_size: number | null }[];
       };
       // Every figure the Teams tab shows, for every team the caller belongs to,
       // in one round trip. Replaces a get_team_overview + get_team_stats pair
       // per rendered card.
+      /**
+       * The team's declared FORMAT, in players per side.
+       *
+       * The RPC keeps its old name because the column does
+       * (`teams.target_size`), but its meaning changed in
+       * 20260903090000_squad_only_matchmaking.sql: it was "recruit up to N
+       * players" and is now "we are an N v N side". It is the value strict
+       * format-to-format matchmaking compares on both sides of every fixture,
+       * and null means the team is not in matchmaking at all.
+       *
+       * `list_teams_needing_players`, `request_to_join_team`,
+       * `list_team_join_requests` and `respond_to_join_request` were dropped in
+       * the same migration with the solo-player Find Players flow.
+       */
+      set_team_target_size: {
+        Args: { in_team_id: string; in_size: number | null };
+        Returns: Database['public']['Tables']['teams']['Row'];
+      };
       get_my_teams_overview: {
         Args: Record<string, never>;
-        Returns: { id: string; name: string; sport: Sport; invite_code: string; logo_url: string | null; home_ground: string | null; player_count: number; my_role: TeamRole; i_am_owner: boolean; matches_played: number; wins: number; losses: number; ties: number; win_rate: number }[];
+        Returns: { id: string; name: string; sport: Sport; invite_code: string; logo_url: string | null; home_ground: string | null; player_count: number; my_role: TeamRole; i_am_owner: boolean; matches_played: number; wins: number; losses: number; ties: number; win_rate: number; /** The team's declared format in players per side. Null = not in matchmaking. Added 20260903090000. */ target_size: number | null }[];
       };
       get_team_stats: {
         Args: { in_team_id: string };
@@ -706,10 +954,6 @@ export interface Database {
       get_team_fixtures: {
         Args: { in_team_id: string };
         Returns: { match_id: string; match_name: string; scheduled_at: string; venue_text: string | null; status: MatchStatus; is_upcoming: boolean; opponent_id: string | null; opponent_name: string | null; is_home: boolean; our_runs: number | null; our_wickets: number | null; their_runs: number | null; their_wickets: number | null; outcome: 'won' | 'lost' | 'tied' | null; result_text: string | null }[];
-      };
-      set_member_role: {
-        Args: { in_team_id: string; in_user_id: string; in_role: 'member' | 'vice_captain' };
-        Returns: Database['public']['Tables']['team_members']['Row'];
       };
       decline_open_challenge: { Args: { in_challenge_id: string; in_team_id: string }; Returns: Database['public']['Tables']['challenge_candidates']['Row'] };
       /**
@@ -745,14 +989,20 @@ export interface Database {
           distance_m: number;
           status: CandidateStatus;
           responded_at: string | null;
-          /**
-           * True when the signed-in user OWNS this candidate team. A user with
-           * two squads can legitimately have one offered the other's fixture,
-           * and `accept_open_challenge` checks the ACCEPTING team's owner — so
-           * this, not "am I the poster", is what decides whether Accept and
-           * Reject can be shown on a candidate row.
-           */
-          i_own_team: boolean;
+          /*
+            `i_own_team` used to be declared here and was REMOVED on 7 Sep 2026.
+            `20260822122000_interactive_team_matchmaking` redefined
+            get_challenge_candidates without it, so the column has not existed
+            since August — the type promised `boolean` and delivered
+            `undefined`, which TypeScript cannot catch because generated types
+            are asserted rather than checked.
+
+            It was not restored, because the clause it guarded is unreachable
+            anyway: `rank_challenge_candidates` excludes teams the poster owns
+            (`t.owner_id <> c.created_by`), so an 'offered' candidate row can
+            never BE one of your own teams. Adding the column back would have
+            produced a flag that is always false.
+          */
         }[];
       };
       get_my_next_match: {
@@ -828,9 +1078,10 @@ export interface Database {
       record_delivery: {
         Args: {
           in_innings_id: string;
-          in_striker_id: string;
+          /** Null for a team-only ball — see the team_only_scoring migration. */
+          in_striker_id: string | null;
           in_non_striker_id: string | null;
-          in_bowler_id: string;
+          in_bowler_id: string | null;
           in_runs_off_bat?: number;
           in_extra_type?: ExtraType | null;
           in_extra_runs?: number;
@@ -980,7 +1231,7 @@ export interface Database {
           to_team_id: string | null;
           to_team_name: string | null;
           match_name: string;
-          venue_name: string;
+          venue_name: string | null;
           scheduled_at: string;
           total_slots: number;
           message: string | null;
@@ -998,6 +1249,149 @@ export interface Database {
         Args: { in_match_id: string };
         Returns: Database['public']['Tables']['matches']['Row'];
       };
+      /**
+       * Attach or clear a match's venue after creation. Organiser-only.
+       * `in_venue_id: null` clears the tag. See
+       * 20260827110000_set_match_venue.sql.
+       */
+      /**
+       * Captain-suggested ground. Hand-written to match
+       * 20260830140000_suggest_venue.sql. Coordinates come from the device, not
+       * a geocoder, so lat/lng are required and 0,0 is rejected server-side —
+       * that value is how the null-island row got into this table.
+       */
+      suggest_venue: {
+        Args: {
+          in_name: string;
+          in_address: string | null;
+          in_lat: number;
+          in_lng: number;
+          in_sport: Sport;
+        };
+        Returns: Database['public']['Tables']['venues']['Row'];
+      };
+      /** Approve or hide a ground. Admin-only, enforced server-side. */
+      set_venue_status: {
+        Args: { in_venue_id: string; in_status: 'approved' | 'pending' | 'hidden' };
+        Returns: Database['public']['Tables']['venues']['Row'];
+      };
+      set_match_venue: {
+        Args: { in_match_id: string; in_venue_id?: string | null };
+        Returns: Database['public']['Tables']['matches']['Row'];
+      };
+      /**
+       * Player of the Game, awarded after the fact from the result screen.
+       * Organiser or scorer only; the game must be completed and the user must
+       * be on its sheet. A null id clears the award.
+       * 20260831174852_set_motm_and_game_tied.sql.
+       */
+      /**
+       * Hard-delete a game. Organiser only, and refused once anyone else has
+       * joined (MATCH_HAS_PLAYERS) or a ball has been bowled / it is finished
+       * (MATCH_ALREADY_PLAYED) -- cancelling is the honest action then.
+       * 20260901052359_all_out_and_delete_match.sql.
+       */
+      delete_match: {
+        Args: { in_match_id: string };
+        Returns: undefined;
+      };
+      set_motm: {
+        Args: { in_match_id: string; in_user_id?: string | null };
+        Returns: Database['public']['Tables']['matches']['Row'];
+      };
+      /**
+       * Venue ratings. 20260831174949_venue_ratings.sql. `rate_venue` refuses
+       * anyone who was not on the sheet for a completed game at that ground
+       * (NOT_PLAYED_HERE) and upserts, so rating again replaces your score.
+       * A trigger recomputes venues.rating / rating_count from the rows.
+       */
+      rate_venue: {
+        Args: { in_venue_id: string; in_rating: number };
+        Returns: Database['public']['Tables']['venues']['Row'];
+      };
+      /** Returns exactly one row: may the caller rate, and what did they give. */
+      my_venue_rating: {
+        Args: { in_venue_id: string };
+        Returns: { can_rate: boolean; my_rating: number | null }[];
+      };
+      /**
+       * Captain chat. All three hand-written to match
+       * 20260830090000_captain_chat_rpcs_and_lockdown.sql. The client holds
+       * only SELECT on captain_chat_messages, so these RPCs are the only
+       * read/write path -- there is no direct-table fallback if a signature
+       * here drifts from pg_proc.
+       *
+       * A thread is (match or challenge) PLUS the counterpart. The counterpart
+       * is named by in_to_team_id (an applicant list knows the team) or
+       * in_other_user_id (a push tap knows only the sender); both are ignored
+       * for a match, where the two sides are already settled.
+       */
+      send_captain_message: {
+        Args: {
+          in_match_id: string | null;
+          in_challenge_id: string | null;
+          in_to_team_id: string | null;
+          in_other_user_id: string | null;
+          in_content: string;
+        };
+        Returns: Database['public']['Tables']['captain_chat_messages']['Row'];
+      };
+      get_captain_chat: {
+        Args: {
+          in_match_id: string | null;
+          in_challenge_id: string | null;
+          in_to_team_id: string | null;
+          in_other_user_id: string | null;
+        };
+        Returns: {
+          id: string;
+          challenge_id: string | null;
+          match_id: string | null;
+          sender_id: string;
+          recipient_id: string;
+          content: string;
+          is_read: boolean;
+          created_at: string;
+          sender_name: string | null;
+          sender_avatar: string | null;
+          counterpart_id: string;
+          counterpart_name: string | null;
+        }[];
+      };
+      mark_chat_read: {
+        Args: {
+          in_match_id: string | null;
+          in_challenge_id: string | null;
+          in_to_team_id: string | null;
+          in_other_user_id: string | null;
+        };
+        Returns: number;
+      };
+      /**
+       * Every game played inside one booked slot, oldest first. Hand-written
+       * to match the RETURNS TABLE in 20260825120000_slot_multi_match.sql —
+       * this file is not generated, so the two are kept in step by hand.
+       */
+      get_match_series: {
+        Args: { in_match_id: string };
+        Returns: {
+          id: string;
+          game_number: number;
+          match_name: string;
+          status: string;
+          scheduled_at: string;
+          end_time: string | null;
+          team_a_id: string | null;
+          team_b_id: string | null;
+          winner_team_id: string | null;
+          result_text: string | null;
+          team_a_runs: number | null;
+          team_a_wickets: number | null;
+          team_b_runs: number | null;
+          team_b_wickets: number | null;
+          is_current: boolean;
+        }[];
+      };
       cleanup_my_open_fixtures: {
         Args: Record<string, never>;
         Returns: number;
@@ -1012,6 +1406,12 @@ export interface Database {
           in_lng?: number | null;
           in_radius_m?: number;
           in_sport?: string | null;
+          /**
+           * The caller's team format in players per side. NOT optional in
+           * practice: the function returns zero rows for a null, because a team
+           * that has not declared a format cannot legally accept any fixture.
+           */
+          in_team_size: number | null;
         };
         Returns: {
           challenge_id: string;
@@ -1021,7 +1421,7 @@ export interface Database {
           from_team_logo: string | null;
           sport: string;
           venue_id: string | null;
-          venue_name: string;
+          venue_name: string | null;
           area_name: string;
           scheduled_at: string;
           total_slots: number;
@@ -1030,6 +1430,41 @@ export interface Database {
           created_at: string;
           applied_status: string | null;
         }[];
+      };
+      get_venue_slots: {
+        Args: {
+          in_venue_id: string;
+          in_date: string;
+          in_timezone?: string;
+        };
+        Returns: {
+          court_number: number;
+          court_label: string;
+          start_time: string;
+          end_time: string;
+          time_hhmm: string;
+          end_time_hhmm: string;
+          is_available: boolean;
+          booking_id: string | null;
+          is_my_booking: boolean;
+        }[];
+      };
+      book_venue_slot: {
+        Args: {
+          in_venue_id: string;
+          in_court_number: number;
+          in_start_time: string;
+          in_end_time: string;
+          in_match_id?: string | null;
+          in_notes?: string | null;
+        };
+        Returns: Database['public']['Tables']['venue_bookings']['Row'];
+      };
+      cancel_venue_booking: {
+        Args: {
+          in_booking_id: string;
+        };
+        Returns: Database['public']['Tables']['venue_bookings']['Row'];
       };
     };
     Enums: { app_role: AppRole };

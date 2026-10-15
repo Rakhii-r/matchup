@@ -10,7 +10,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   name: 'SIXFOUR 24',
   slug: 'matchup',
   scheme: 'sixfour24',
-  version: '0.1.0',
+  version: '1.0.0',
   // EAS Update. `eas update:configure` could not write these because this is a
   // dynamic config, so they are set by hand. The url is derived from the EAS
   // project id above and is public. `appVersion` policy means a build only
@@ -45,9 +45,15 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       // Android 13+ (API 33) requires this before any notification shows.
       'POST_NOTIFICATIONS',
     ],
+    blockedPermissions: [
+      'android.permission.RECORD_AUDIO',
+      'android.permission.SYSTEM_ALERT_WINDOW',
+    ],
   },
   plugins: [
     'expo-router',
+    'expo-font',
+    'expo-status-bar',
     'expo-secure-store',
     [
       'expo-splash-screen',

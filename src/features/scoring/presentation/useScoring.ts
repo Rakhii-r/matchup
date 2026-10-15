@@ -4,14 +4,23 @@ import { scoringRepository } from '@features/scoring/data/scoringRepository';
 import type { DeliveryInput } from '@features/scoring/domain/scoringSchema';
 
 const liveKey = (matchId: string) => ['match', matchId, 'live'] as const;
+const inningsKey = (matchId: string) => ['match', matchId, 'innings'] as const;
 const overKey = (inningsId: string) => ['innings', inningsId, 'over'] as const;
 const battingKey = (inningsId: string) => ['innings', inningsId, 'batting'] as const;
 const bowlingKey = (inningsId: string) => ['innings', inningsId, 'bowling'] as const;
 
 /**
+ * 8s, not 4s: a ball is bowled roughly every 30 seconds, and a watcher runs
+ * `useLiveState` and `useThisOver` together, so 4s was thirty requests a minute
+ * per spectator to learn about two balls. Polling stops while the app is in
+ * the background (focusManager in queryClient).
+ */
+const WATCHER_POLL_MS = 8000;
+
+/**
  * Live score.
  *
- * Polls every 4s for WATCHERS only. The scorer's own device already refetches
+ * Polls for WATCHERS only. The scorer's own device already refetches
  * after each ball it records, so polling them would fight their input and waste
  * battery for no benefit — `isScorer` turns it off.
  */
@@ -20,7 +29,20 @@ export function useLiveState(matchId: string, isScorer: boolean) {
     queryKey: liveKey(matchId),
     queryFn: () => scoringRepository.getLive(matchId),
     enabled: matchId.length > 0,
-    refetchInterval: isScorer ? false : 4000,
+    refetchInterval: isScorer ? false : WATCHER_POLL_MS,
+  });
+}
+
+/**
+ * Both innings of the match, oldest first. The scorecard needs the first
+ * innings as well as the one in play, and `get_live_state` only ever returns
+ * the latest, so the full card cannot be built from live state alone.
+ */
+export function useMatchInnings(matchId: string) {
+  return useQuery({
+    queryKey: inningsKey(matchId),
+    queryFn: () => scoringRepository.listInnings(matchId),
+    enabled: matchId.length > 0,
   });
 }
 
@@ -29,7 +51,7 @@ export function useThisOver(inningsId: string | null, isScorer: boolean) {
     queryKey: overKey(inningsId ?? 'none'),
     queryFn: () => scoringRepository.getThisOver(inningsId as string),
     enabled: Boolean(inningsId),
-    refetchInterval: isScorer ? false : 4000,
+    refetchInterval: isScorer ? false : WATCHER_POLL_MS,
   });
 }
 
@@ -57,7 +79,10 @@ export function useBowlingCard(inningsId: string | null) {
 function useInvalidateScoring(matchId: string, inningsId: string | null) {
   const qc = useQueryClient();
   return () => {
-    void qc.invalidateQueries({ queryKey: liveKey(matchId) });
+    // Prefix key — covers ['match', id, 'live' | 'innings'] AND the match row
+    // itself, which matters now that a ball can complete the match: the score
+    // screen watches matches.status to know when to show the result.
+    void qc.invalidateQueries({ queryKey: ['match', matchId] });
     if (inningsId) {
       void qc.invalidateQueries({ queryKey: overKey(inningsId) });
       void qc.invalidateQueries({ queryKey: battingKey(inningsId) });
@@ -113,6 +138,21 @@ export function useEndInnings(matchId: string, inningsId: string | null) {
  * the match row has been re-read. The result screen therefore paints the
  * finished row straight away instead of the stale in-progress one.
  */
+/**
+ * Award or clear Player of the Game after the game is over.
+ *
+ * Not folded into useFinishMatch: the second innings auto-completes inside
+ * record_delivery, so on a chase there is no "Finish" tap at all and the award
+ * has to be makeable afterwards from the result screen.
+ */
+export function useSetMotm(matchId: string) {
+  const invalidate = useInvalidateScoring(matchId, null);
+  return useMutation({
+    mutationFn: (motmUserId: string | null) => scoringRepository.setMotm(matchId, motmUserId),
+    onSuccess: invalidate,
+  });
+}
+
 export function useFinishMatch(matchId: string) {
   const qc = useQueryClient();
   return useMutation({

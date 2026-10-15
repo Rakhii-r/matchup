@@ -14,7 +14,7 @@
  * list — a sport hidden in Sports Management disappears from here on the next
  * refetch. Artwork comes from the one shared map in `@shared/ui/sportImages`.
  */
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { ImageBackground, Pressable, StyleSheet, View } from 'react-native';
 import { MotiView } from 'moti';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -63,7 +63,7 @@ const MATCH_TYPES: {
   },
   {
     value: 'post_match',
-    title: 'Post a Match',
+    title: 'Post a Game',
     tag: '(Open for all)',
     caption: 'Open for individual players to join. No team needed.',
     Icon: IconSend,
@@ -83,7 +83,13 @@ export default function SelectGameStep(): React.ReactNode {
   const M = useMock();
   const styles = useMemo(() => makeStyles(M), [M]);
   const router = useRouter();
-  const params = useLocalSearchParams<{ sport?: string; type?: string; teamId?: string }>();
+  const params = useLocalSearchParams<{
+    sport?: string;
+    type?: string;
+    teamId?: string;
+    resume?: string;
+    fresh?: string;
+  }>();
 
   const sports = useActiveSports();
   const sportLabel = useSportLabel();
@@ -99,29 +105,63 @@ export default function SelectGameStep(): React.ReactNode {
   const preselectedType =
     params.type === 'team_vs_team' || params.type === 'post_match' ? params.type : null;
 
-  // Fresh entry into the wizard: clear whatever a previous run left behind,
-  // then honour the sport, type and team pre-selected by callers.
+  const initializedRef = useRef(false);
+
+  // If explicit resume is passed, keep whatever draft was saved.
+  // Otherwise, if new params or fresh create is requested, apply them on mount only.
   useEffect(() => {
-    reset();
+    if (initializedRef.current) return;
+    initializedRef.current = true;
+
+    if (params.resume === 'true') {
+      return;
+    }
+    if (params.fresh === 'true' || (!preselectedSport && !preselectedType && !params.teamId)) {
+      reset();
+    }
     if (preselectedSport) setSport(preselectedSport);
     if (preselectedType) setMatchType(preselectedType);
     if (params.teamId) setTeamId(params.teamId);
-  }, [reset, setSport, setMatchType, setTeamId, preselectedSport, preselectedType, params.teamId]);
+  }, [reset, setSport, setMatchType, setTeamId, preselectedSport, preselectedType, params.teamId, params.resume, params.fresh]);
 
   const { index, total } = stepPosition('sport');
   const rows = sports.data ?? [];
 
+  /*
+    A team's sport is a CONSTRAINT, not a preference.
+
+    Every caller that passes teamId also passes that team's sport (the team
+    screen's Find Opponent / Post Another Game, and the radar). Arriving that
+    way, the grid still rendered every active sport, so a Box Cricket team could
+    be sent to look for a badminton opponent.
+
+    Deliberately keyed on teamId rather than on the sport param: the Games tab
+    passes ?sport= as a filter the user is free to change. And it releases if
+    they switch to Post a Game, because that flow has no team to be bound by.
+  */
+  const sportLockedByTeam = Boolean(params.teamId) && matchType === 'team_vs_team';
+  const visibleRows = sportLockedByTeam ? rows.filter((r) => r.sport === sport) : rows;
+
   return (
     <WizardScreen
-      title="Create Match"
+      title="Create Game"
       stepIndex={index}
       totalSteps={total}
-      subtitle="Pick the game and how you want to fill it."
+      subtitle={
+        sportLockedByTeam
+          ? 'Your team sets the sport. Choose how you want to fill it.'
+          : 'Pick the sport and how you want to fill it.'
+      }
       primaryLabel="Next"
       primaryDisabled={sport === null || matchType === null}
       onPrimary={() => router.push('/match/create/area')}
     >
-      <SectionLabel>SELECT GAME</SectionLabel>
+      <SectionLabel>{sportLockedByTeam ? 'SPORT' : 'SELECT GAME'}</SectionLabel>
+      {sportLockedByTeam ? (
+        <AppText variant="caption" color={M.faint} style={{ marginBottom: S.xs }}>
+          Set by your team — a team plays only its own sport.
+        </AppText>
+      ) : null}
 
       {sports.isLoading ? <StepState kind="loading" message="Loading sports…" /> : null}
 
@@ -141,9 +181,9 @@ export default function SelectGameStep(): React.ReactNode {
         />
       ) : null}
 
-      {rows.length > 0 ? (
+      {visibleRows.length > 0 ? (
         <View style={styles.grid}>
-          {rows.map((row) => {
+          {visibleRows.map((row) => {
             const on = sport === row.sport;
             return (
               <Pressable
@@ -155,6 +195,7 @@ export default function SelectGameStep(): React.ReactNode {
                 accessibilityLabel={sportLabel(row.sport)}
               >
                 <MotiView
+                  pointerEvents="none"
                   animate={{ scale: on ? 1 : 0.96, borderColor: on ? M.green : M.border }}
                   transition={{ type: 'spring', damping: 14, stiffness: 180 }}
                   style={[styles.tile, on ? styles.tileOn : null]}
@@ -165,7 +206,7 @@ export default function SelectGameStep(): React.ReactNode {
                     imageStyle={styles.tileImageRadius}
                   >
                     <View style={styles.shade} />
-                    <AppText variant="label" color={M.text} style={styles.tileLabel}>
+                    <AppText variant="label" color="#FFFFFF" style={styles.tileLabel}>
                       {sportLabel(row.sport)}
                     </AppText>
                   </ImageBackground>
@@ -190,6 +231,7 @@ export default function SelectGameStep(): React.ReactNode {
               accessibilityLabel={`${title} ${tag}. ${caption}`}
             >
               <MotiView
+                pointerEvents="none"
                 animate={{
                   borderColor: on ? M.green : M.border,
                   backgroundColor: on ? M.cardHi : M.card,
@@ -263,7 +305,8 @@ const makeStyles = (M: MockPalette) =>
       left: 0,
       right: 0,
       bottom: 0,
-      backgroundColor: M.overlay,
+      // Fixed, not the theme overlay: the label on top is always white.
+      backgroundColor: 'rgba(0,0,0,0.42)',
     },
     tileLabel: { paddingHorizontal: S.md, paddingBottom: S.sm + 2, fontSize: 16, fontWeight: '700' },
     // The two type cards sit side by side, one row, equal width.

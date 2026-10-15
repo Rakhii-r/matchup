@@ -16,7 +16,7 @@ Cross-platform mobile app (iOS + Android) for organising casual **Box Cricket** 
 - **App:** React Native + Expo (TypeScript, strict), Expo Router (file-based, typed routes)
 - **Server state:** TanStack Query · **Client state:** Zustand
 - **Forms/validation:** react-hook-form + Zod (validate every external input at the boundary)
-- **Backend:** Supabase — Auth (phone OTP: **dev = Twilio Verify SMS + test phone numbers**; production = MSG91 with DLT via Jio TrueConnect, swap is config-only), Postgres + PostGIS, Realtime, Storage, Edge Functions
+- **Backend:** Supabase — Auth (phone OTP: **Twilio Verify** in dev and at launch, plus test phone numbers; MSG91 with DLT via Jio TrueConnect later — Supabase has no built-in MSG91 provider, so that swap needs a Send SMS auth hook. See `docs/SMS_OTP_SETUP.md`), Postgres + PostGIS, Realtime, Storage, Edge Functions
 - **Session storage:** expo-secure-store (NEVER AsyncStorage in plaintext)
 - **Push:** Firebase Cloud Messaging (via expo-notifications)
 - **Analytics/crash:** PostHog + Sentry · **Builds:** EAS
@@ -64,6 +64,26 @@ design systems" task.
 The toggle lives in the Nearby header. The choice is persisted to
 expo-secure-store and survives a restart; with no override the app defaults to
 dark regardless of the OS setting.
+
+## Emerald redesign kit (6 Oct 2026)
+
+Thirteen screens were restyled to the emerald mockups: Home, Games, Teams,
+Create team, Team details, Challenges, Booked & Scheduled Games, Select Area,
+Game Details, the venue booking sheet, Toss, Live Scoring and Scorecard. No
+repository, RPC or route changed.
+
+- `src/shared/ui/decor.tsx` holds the shared pieces: `PageHeader` / `RoundBack`
+  (round mint back button + bold title), `IconTile`, and the SVG illustrations
+  (`StadiumBackdrop`, `HillsArt`, `MapPinArt`, `CalendarArt`). The artwork is
+  drawn from the palette, not shipped as bitmaps, so it follows the theme.
+- `app/teams/_layout.tsx` styles the header for every `/teams/*` route. A
+  screen there only sets `title`.
+- The tab bar FLOATS (`position: 'absolute'`). Nothing reserves space for it:
+  every tab screen pads with `useTabContentPadding()`, which is derived from
+  `TAB_BAR_HEIGHT` + `TAB_BAR_GAP` in `responsive.ts`.
+- `Button` takes `icon` and `trailing` render props; both receive the label
+  colour.
+- The Teams tab badge is the real team count. It used to be a hard-coded `2`.
 
 ## Navigation
 
@@ -123,6 +143,45 @@ params, which are lost on back-navigation.
   cosmetic and says so. Widening the search withdraws the challenge first,
   because `post_open_challenge` refuses a second live one per team.
 
+**Squad vs squad only, and format is a hard filter (3 Sep 2026).** Two rules
+that are really one rule, in `20260904092956_squad_only_matchmaking.sql`.
+
+*No individual enters team matchmaking.* The Find Players board — a solo player
+browsing squads and asking to join one — is gone: `app/teams/find-players.tsx`,
+`app/match/create/player-searching.tsx` and `app/teams/[id]/requests.tsx` are
+deleted, `list_teams_needing_players`, `request_to_join_team`,
+`list_team_join_requests` and `respond_to_join_request` are dropped, and
+`recruitRepository` is down to one method. `public.team_join_requests` is kept
+but inert — no RPC, no grants — so historical rows survive; drop it separately
+when the data is no longer wanted. A squad grows by invite code.
+
+*A team plays one format, and only that format.* `teams.target_size` was
+"recruiting to N players" and is now the team's DECLARED FORMAT in players per
+side — a 6 means "we are a 6 v 6 side". A fixture's format is `total_slots / 2`
+(`public.challenge_format`), a team's is `target_size`, and
+`public.team_format_matches` is the single comparison every path uses. A NULL
+format is NOT a wildcard: the team is out of matchmaking in both directions,
+which is why the discovery screens distinguish "no team", "no format" and "no
+opponents at this format" instead of showing one empty list.
+
+Enforced in seven places so no path can skip it: `rank_challenge_candidates`
+(the radar ranks same-format teams only), `list_open_challenges_nearby` (which
+gained a required `in_team_size` and returns nothing for a null),
+`apply_to_open_challenge`, `accept_open_challenge` (both sides re-checked at
+acceptance), and the three triggers — insert and accept on `team_challenges`,
+insert/update on `challenge_candidates` — which is what covers `create_challenge`
+and `respond_to_challenge` without editing either. Tokens are
+`FORMAT_MISMATCH` and `OPPONENT_FORMAT_MISMATCH`, ordered before each other in
+`challengeRepository`'s table for the same substring reason as the squad tokens.
+
+The per-fixture override still exists and is honest: Step 3 defaults the size
+chips to the team's format, and choosing a different one calls
+`set_team_target_size` FIRST and posts second. Posting first simply fails — the
+insert trigger compares the fixture's format with the poster's — because a team
+judged by one format while posting another is the asymmetry the whole change
+exists to remove. `rank_challenge_candidates` also regained the two self-match
+exclusions that `20260820120000` dropped when it rewrote the function.
+
 `app/teams/offers.tsx` is both sides of an open challenge. With no params it is
 the **incoming** list (accept / decline). With `?challengeId=` it is the
 **poster's** view of who the fixture reached, fed by `get_challenge_candidates`
@@ -151,8 +210,9 @@ per-match figures on Profile. `overs`, `opponent_name` and `strike_rate` are
 genuinely nullable on it — a fixture from before in-app scoring has no over
 count, an open match has no named opponent team, and a strike rate divides by
 balls faced — so the screen labels those states rather than filling them in.
-Like its five siblings it exists only in the deployed database, not in
-`supabase/migrations`.
+`get_player_stats`, `get_my_next_match`, `get_my_recent_matches` and this one
+were created directly against the project; they are written down in
+`20261002141000_capture_dashboard_rpcs.sql` so a rebuilt database has them.
 
 `list_my_notifications` exists because `notification_jobs` has RLS on with zero
 policies: it is a delivery queue whose attempts/last_error columns are
@@ -166,6 +226,54 @@ operational. The RPC exposes only the four columns that belong on screen.
 - No `TODO`/placeholder code, no empty catch blocks. Handle every error path.
 - Explicit typing; no `any` without a justified comment. Treat all external input as nullable.
 - Always paginate lists. Clean up subscriptions/timers on unmount.
+
+## Auth bootstrap and network resilience (2 Oct 2026)
+
+Rules that exist because their absence was a shipped bug. Do not undo them.
+
+- **A failed read is not an answer.** `AuthStatus` has a fifth value,
+  `offline`: "we could not find out". Only a profile query that SUCCEEDS with
+  no row may set `needs_profile`, and only a session read that succeeds with no
+  session may set `signed_out`. `loadProfile` returning `false` must leave the
+  store alone. Before this, any network blip sent existing users to
+  create-profile, and an offline cold start sent them to login.
+- **`bootstrapAuth()` owns the first session read**; `INITIAL_SESSION` is
+  ignored. `TOKEN_REFRESHED` only swaps the session when a profile is already
+  loaded — it must not refetch the profile every hour.
+- **Never call Supabase inside `onAuthStateChange` synchronously.** auth-js
+  holds its lock during the callback. Signed-in handling is deferred with
+  `setTimeout(…, 0)`; sign-out is applied in the same tick because it makes no
+  requests and the route guard must see it immediately.
+- **Sign-out clears the query cache** (`queryClient.clear()` in
+  `applySession`). Most query keys carry no user id.
+- **Every Supabase request has a timeout** (`fetchWithTimeout` in
+  `supabaseClient.ts`: 15s, 30s for storage). React Native's fetch has none.
+- **`secureStorage` writes are two-slot + pointer.** Write the idle slot, then
+  flip `<key>__ptr`. Never delete-then-write: Android kills the app while
+  backgrounding, which is when the token refreshes.
+- **`toAppError` checks 429 and 5xx before the "otp" substring rule.**
+- **Queries retry twice with jitter and never on `conflict`/`rate_limited`.**
+  `focusManager` is wired to `AppState`, so `refetchOnWindowFocus` is how the
+  app catches up on Realtime events missed in the background.
+- **`onlineManager` is fed by `expo-network`, imported lazily** so an OTA
+  update cannot crash a binary built before the dependency existed. Queries
+  and mutations run with `networkMode: 'always'`: offline they FAIL and show
+  their error state rather than pausing, and a mutation never fires late. The
+  gain is `refetchOnReconnect`, plus the offline screen dismissing itself.
+- **In-app popups come from `notification_jobs`, not from table listeners.**
+  `MatchJoinAlerts` holds two Realtime listeners, both filtered by user id:
+  the user's own notification rows, and `team_challenges` they created (a
+  direct challenge being accepted enqueues nothing for the challenger). A new
+  event that needs a popup should `enqueue_notification` in the database and
+  put what the popup needs in `data` — `join_requested` carries `playerRowId`
+  for exactly that reason. Do not add a listener on `match_players` or
+  `challenge_candidates`: they cannot be filtered per user, so Realtime runs
+  every subscriber's RLS check against every change, and the event shows two
+  popups because the queue already announces it.
+- Watchers poll the live score every 8s (`WATCHER_POLL_MS`), not 4s.
+- `logger.error` reaches Sentry through the sink registered in `initSentry`.
+
+Lists are capped, not paginated. The plan is `docs/PAGINATION_PLAN.md`.
 
 ## Folder map
 
@@ -184,6 +292,10 @@ supabase/     migrations (schema + RLS + PostGIS + RPC), functions, seed.sql
 OTP login · create profile · create/join match · fill missing players (count-based) ·
 approve & confirm · play & mark attended · "I'm available today" · static venue directory
 ("call to confirm") · attendance flag · report & block.
+
+Note "fill missing players" means filling an OPEN match's sheet with individual
+players. It never meant filling a team fixture: since 3 Sep 2026 no individual
+can queue for, search for or join a Team vs Team lobby at all.
 
 **Open matches (18 Aug 2026).** `matches.match_type` is `'team_vs_team'` or
 `'open'`; every row that predates the column is `'team_vs_team'`, which is what
@@ -303,3 +415,24 @@ dedicated doc under `docs/` for anything with a real design behind it.
 - `npm start` / `npm run android` / `npm run ios`
 - `npm run typecheck` · `npm run lint`
 - DB types: `npm run db:types` (requires Supabase CLI + local stack)
+
+### If lint drowns in "Resolve error"
+
+`import/no-unresolved` is an error here, and the `typescript` entry in
+`import/resolver` is served by `eslint-import-resolver-typescript`, which since
+v3.7 wraps `unrs-resolver` -- a NATIVE binding published as one optional
+dependency per platform. npm installs only the one matching the machine doing
+the install (npm/cli#4828), so a `node_modules` installed on Windows and linted
+from Linux/WSL/CI throws "Cannot find native binding" and eslint-plugin-import
+prints a full stack trace ON EVERY FILE. It looks like a crash; nothing is
+wrong with the code being linted.
+
+`.eslintrc.cjs` guards this: it loads the resolver once, and if it cannot, it
+drops that resolver and turns `import/no-unresolved` off for the run with one
+explanatory line on stderr, so the other rules still report. To fix it properly,
+install the binding for the platform you are linting on -- the version must
+match `unrs-resolver` exactly:
+
+```
+npm i --no-save @unrs/resolver-binding-linux-x64-gnu@$(node -p "require('unrs-resolver/package.json').version")
+```

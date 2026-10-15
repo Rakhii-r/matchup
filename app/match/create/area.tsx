@@ -4,7 +4,7 @@
  * Captures the discovery area locality and search radius for player/team matching.
  * Specific venue selection is deferred until an opponent or squad is confirmed.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -31,7 +31,8 @@ import {
 import { useSportLabel } from '@features/sports/presentation/useSports';
 import { R, S, useMock, type MockPalette } from '@shared/theme/mockTheme';
 import { AppText } from '@shared/ui/AppText';
-import { IconPin } from '@shared/ui/icons';
+import { MapPinArt } from '@shared/ui/decor';
+import { IconClose, IconCrosshair, IconInfo, IconNavArrow, IconPin } from '@shared/ui/icons';
 
 const RADIUS_KM = [1, 3, 5, 10, 25, 50];
 
@@ -55,15 +56,29 @@ export default function SelectAreaStep(): React.ReactNode {
   const [locBusy, setLocBusy] = useState(false);
   const [locNotice, setLocNotice] = useState<'denied' | 'error' | null>(null);
 
-  // If the user already has a saved area/home location in profile, prefill it for convenience
+  /*
+    Prefill the area from the saved profile, ONCE.
+
+    This used to depend on `areaName` and `areaCoords` — the very values it
+    writes — so setting them re-ran it, and every arrival on this step cost a
+    second render just to reach the same answer. The current values are read off
+    the store instead of the closure, which keeps them out of the dependency
+    list without going stale; the ref stops a late-arriving profile from
+    overwriting something the user has since typed.
+  */
+  const prefilled = useRef(false);
   useEffect(() => {
-    if (!areaName && profile?.area_name) {
+    if (prefilled.current || !profile) return;
+    prefilled.current = true;
+
+    const saved = useCreateMatchWizard.getState();
+    if (!saved.areaName && profile.area_name) {
       setAreaName(profile.area_name);
     }
-    if (!areaCoords && profile?.home_lat && profile?.home_lng) {
+    if (!saved.areaCoords && profile.home_lat && profile.home_lng) {
       setAreaCoords({ lat: profile.home_lat, lng: profile.home_lng });
     }
-  }, [profile, areaName, areaCoords, setAreaName, setAreaCoords]);
+  }, [profile, setAreaName, setAreaCoords]);
 
   const radiusKm = Math.round(searchRadiusM / 1000);
 
@@ -101,7 +116,6 @@ export default function SelectAreaStep(): React.ReactNode {
       title="Select Area"
       stepIndex={index}
       totalSteps={total}
-      subtitle="Where do you want to play?"
       primaryLabel="Next"
       primaryDisabled={!isFormValid}
       onPrimary={onNext}
@@ -117,22 +131,51 @@ export default function SelectAreaStep(): React.ReactNode {
 
       {sport !== null ? (
         <View style={styles.container}>
+          {/* ---------------- Hero ---------------- */}
+          <View style={styles.hero}>
+            <View style={styles.heroText}>
+              <AppText variant="heading" color={M.text} style={styles.heroTitle}>
+                Where do you want to play?
+              </AppText>
+              <AppText variant="caption" color={M.muted} style={styles.heroBody}>
+                Select your location and search radius to find nearby players and teams.
+              </AppText>
+            </View>
+            <MapPinArt size={132} />
+          </View>
+
           {/* ---------------- Section 1: Locality ---------------- */}
           <SectionLabel>YOUR AREA</SectionLabel>
 
           <View style={styles.inputWrap}>
-            <TextInput
-              value={areaName}
-              onChangeText={(text) => {
-                setAreaName(text);
-                if (locNotice) setLocNotice(null);
-              }}
-              placeholder="e.g. Baner, Pune"
-              placeholderTextColor={M.faint}
-              autoCapitalize="words"
-              style={styles.textInput}
-              accessibilityLabel="Play area locality"
-            />
+            <View style={styles.inputRow}>
+              <View style={styles.inputPin}>
+                <IconPin color={M.green} size={20} />
+              </View>
+              <TextInput
+                value={areaName}
+                onChangeText={(text) => {
+                  setAreaName(text);
+                  if (locNotice) setLocNotice(null);
+                }}
+                placeholder="e.g. Baner, Pune"
+                placeholderTextColor={M.faint}
+                autoCapitalize="words"
+                style={styles.textInput}
+                accessibilityLabel="Play area locality"
+              />
+              {areaName.length > 0 ? (
+                <Pressable
+                  onPress={() => setAreaName('')}
+                  hitSlop={10}
+                  style={styles.clearBtn}
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear area"
+                >
+                  <IconClose color={M.card} size={12} strokeWidth={3} />
+                </Pressable>
+              ) : null}
+            </View>
 
             <Pressable
               onPress={captureLocation}
@@ -144,16 +187,17 @@ export default function SelectAreaStep(): React.ReactNode {
               {locBusy ? (
                 <ActivityIndicator color={M.green} size="small" />
               ) : (
-                <IconPin color={M.green} size={16} />
+                <IconCrosshair color={M.green} size={20} />
               )}
-              <AppText variant="caption" color={M.green} style={{ fontWeight: '600' }}>
+              <AppText variant="label" color={M.green} style={{ fontSize: 15 }}>
                 Use Current Location
               </AppText>
             </Pressable>
 
             {areaCoords ? (
               <View style={styles.coordsBadge}>
-                <AppText variant="caption" color={M.muted}>
+                <IconNavArrow color={M.green} size={14} />
+                <AppText variant="caption" color={M.muted} style={{ fontSize: 13 }}>
                   GPS attached: {areaCoords.lat.toFixed(4)}, {areaCoords.lng.toFixed(4)}
                 </AppText>
               </View>
@@ -181,6 +225,7 @@ export default function SelectAreaStep(): React.ReactNode {
                 return (
                   <Chip
                     key={km}
+                    grid
                     label={`${km} km`}
                     on={on}
                     onPress={() => setSearchRadiusM(metres)}
@@ -190,8 +235,18 @@ export default function SelectAreaStep(): React.ReactNode {
             </View>
 
             <View style={styles.helperCard}>
-              <AppText variant="caption" color={M.muted} center>
-                Players and teams within {radiusKm} km of {areaName.trim() || 'your area'} will see this {sportLabel(sport)} match.
+              <IconInfo color={M.green} size={20} />
+              <View style={styles.helperRule} />
+              <AppText variant="caption" color={M.muted} style={styles.helperText}>
+                Players and teams within{' '}
+                <AppText variant="caption" color={M.green} style={styles.helperStrong}>
+                  {radiusKm} km
+                </AppText>{' '}
+                of{' '}
+                <AppText variant="caption" color={M.green} style={styles.helperStrong}>
+                  {areaName.trim() || 'your area'}
+                </AppText>{' '}
+                will see this {sportLabel(sport)} match.
               </AppText>
             </View>
           </View>
@@ -203,41 +258,80 @@ export default function SelectAreaStep(): React.ReactNode {
 
 const makeStyles = (M: MockPalette) =>
   StyleSheet.create({
-    container: { gap: S.md },
-    inputWrap: {
+    container: { gap: S.xs },
+    hero: {
+      flexDirection: 'row',
+      alignItems: 'center',
       gap: S.sm,
+      padding: S.md,
+      borderRadius: 20,
+      backgroundColor: M.chip,
+      overflow: 'hidden',
+    },
+    heroText: { flex: 1, minWidth: 0, gap: S.sm },
+    heroTitle: { fontFamily: 'SpaceGrotesk_700Bold', fontWeight: '700', fontSize: 20, lineHeight: 26 },
+    heroBody: { fontSize: 13, lineHeight: 19 },
+
+    inputWrap: {
+      gap: S.sm + 4,
       backgroundColor: M.card,
       padding: S.md,
-      borderRadius: R.lg,
+      borderRadius: 20,
       borderWidth: 1,
       borderColor: M.border,
     },
-    textInput: {
-      minHeight: TOUCH,
-      backgroundColor: M.bg,
-      borderRadius: R.md,
-      borderWidth: 1.5,
+    inputRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      minHeight: 52,
+      backgroundColor: M.cardHi,
+      borderRadius: R.lg,
+      borderWidth: 1,
       borderColor: M.border,
+      overflow: 'hidden',
+    },
+    inputPin: { width: 52, alignItems: 'center', justifyContent: 'center' },
+    textInput: {
+      flex: 1,
+      minHeight: TOUCH + 6,
+      alignSelf: 'stretch',
+      backgroundColor: M.card,
+      borderTopLeftRadius: R.lg,
+      borderBottomLeftRadius: R.lg,
       paddingHorizontal: S.md,
       color: M.text,
-      fontSize: 15,
+      fontSize: 16,
+    },
+    clearBtn: {
+      position: 'absolute',
+      right: S.sm + 4,
+      width: 20,
+      height: 20,
+      borderRadius: 10,
+      backgroundColor: M.faint,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     locBtn: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'center',
-      gap: 6,
-      minHeight: TOUCH,
+      gap: S.sm,
+      minHeight: 52,
       borderRadius: R.pill,
       borderWidth: 1.5,
       borderColor: M.green,
-      backgroundColor: M.cardHi,
-      marginTop: 2,
+      backgroundColor: M.card,
     },
     coordsBadge: {
-      paddingVertical: 2,
-      paddingHorizontal: S.xs,
+      flexDirection: 'row',
       alignItems: 'center',
+      justifyContent: 'center',
+      gap: S.sm,
+      paddingVertical: S.sm + 2,
+      paddingHorizontal: S.sm,
+      borderRadius: R.md,
+      backgroundColor: M.cardHi,
     },
     notice: { marginTop: S.xs },
 
@@ -245,20 +339,24 @@ const makeStyles = (M: MockPalette) =>
       gap: S.md,
       backgroundColor: M.card,
       padding: S.md,
-      borderRadius: R.lg,
+      borderRadius: 20,
       borderWidth: 1,
       borderColor: M.border,
     },
     chipRow: {
       flexDirection: 'row',
       flexWrap: 'wrap',
-      gap: S.sm,
+      gap: S.sm + 2,
     },
     helperCard: {
-      backgroundColor: M.bg,
-      padding: S.sm + 2,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: S.sm + 4,
+      backgroundColor: M.cardHi,
+      padding: S.sm + 4,
       borderRadius: R.md,
-      borderWidth: 1,
-      borderColor: M.border,
     },
+    helperRule: { width: 1, alignSelf: 'stretch', backgroundColor: M.border },
+    helperText: { flex: 1, fontSize: 13, lineHeight: 19 },
+    helperStrong: { fontWeight: '700', fontSize: 13 },
   });

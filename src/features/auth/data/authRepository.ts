@@ -1,7 +1,10 @@
 import { supabase } from '@core/api/supabaseClient';
 import { toAppError } from '@core/errors/AppError';
 import { logger } from '@core/logging/logger';
-import { unregisterForPushNotifications } from '@core/notifications/pushNotifications';
+import {
+  registerForPushNotifications,
+  unregisterForPushNotifications,
+} from '@core/notifications/pushNotifications';
 
 /**
  * Delivery channel for the OTP. 'whatsapp' routes through Twilio's WhatsApp sender
@@ -50,6 +53,11 @@ export const authRepository = {
     await unregisterForPushNotifications();
 
     const { error } = await supabase.auth.signOut();
-    if (error) throw toAppError(error);
+    if (error) {
+      // Still signed in, but the token was just dropped above. Put it back, or
+      // this session receives no pushes until the app is restarted.
+      void registerForPushNotifications();
+      throw toAppError(error);
+    }
   },
 };

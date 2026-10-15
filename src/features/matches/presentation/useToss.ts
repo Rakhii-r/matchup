@@ -25,7 +25,8 @@ export function useToss(matchId: string) {
 export function usePerformToss(matchId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (overs: number | null) => tossRepository.perform(matchId, overs),
+    mutationFn: ({ call, overs }: { call: 'heads' | 'tails'; overs: number | null }) =>
+      tossRepository.perform(matchId, call, overs),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: tossKey(matchId) });
       // `overs` lives on the match row, so the match card is stale too.
@@ -38,8 +39,16 @@ export function usePerformToss(matchId: string) {
 export function useRedoToss(matchId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => tossRepository.redo(matchId),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['match', matchId] }),
+    mutationFn: (call?: 'heads' | 'tails' | null) => tossRepository.redo(matchId, call),
+    onSuccess: () => {
+      // The toss key explicitly, not just the `['match', id]` prefix it happens
+      // to sit under. `redo_toss` rewrites winner_team_id, outcome AND
+      // created_at, and `created_at` is the `flipKey` the coin animation is
+      // keyed on — a stale row leaves the other captain looking at the previous
+      // winner until the 5s poll catches up.
+      void qc.invalidateQueries({ queryKey: tossKey(matchId) });
+      void qc.invalidateQueries({ queryKey: ['match', matchId] });
+    },
   });
 }
 

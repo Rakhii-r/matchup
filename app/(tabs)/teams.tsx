@@ -2,7 +2,7 @@
  * Teams tab.
  *
  * A thin hub, not a reimplementation. Every action here pushes to the existing
- * `/teams/*` routes — create, join, detail, challenges, offers and the open
+ * `/teams/*` routes — create, join, detail, challenges and the open
  * challenge poster all already exist and are untouched.
  *
  * The list comes from a single `get_my_teams_overview` call. Rendering a card
@@ -11,7 +11,7 @@
  * per-card loading flicker that showed an em-dash where the player count
  * belonged.
  */
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -23,15 +23,36 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { LinearGradient } from 'expo-linear-gradient';
 
+import { useAuthStore } from '@core/auth/authStore';
+import { useChatInbox } from '@features/chat/presentation/useCaptainChat';
+import { usePendingActions } from '@features/dashboard/presentation/useDashboard';
 import { useAllMyBookedMatches } from '@features/matches/presentation/useMatches';
 import { useSportLabel } from '@features/sports/presentation/useSports';
 import type { TeamOverviewRow } from '@features/teams/data/teamRepository';
 import { useMyChallenges } from '@features/teams/presentation/useChallenges';
 import { useMyTeamsOverview } from '@features/teams/presentation/useTeams';
 import { R, S, useMock, type MockPalette } from '@shared/theme/mockTheme';
+import { useTabContentPadding } from '@shared/theme/responsive';
 import { AppText } from '@shared/ui/AppText';
-import { IconCalendar, IconChevron } from '@shared/ui/icons';
+import { HillsArt, IconTile, TINT } from '@shared/ui/decor';
+import {
+  IconBarChart,
+  IconBell,
+  IconCalendar,
+  IconChevron,
+  IconGamepad,
+  IconPlus,
+  IconSend,
+  IconSort,
+  IconSwords,
+  IconTarget,
+  IconTrophy,
+  IconUser,
+  IconUserPlus,
+  IconUsers,
+} from '@shared/ui/icons';
 
 /** W–L, with the tie count appended only when there is one to report. */
 function record(team: TeamOverviewRow): string {
@@ -40,14 +61,31 @@ function record(team: TeamOverviewRow): string {
     : `${team.wins}–${team.losses}`;
 }
 
+type SortMode = 'latest' | 'name';
+
+// The one non-emerald accent on this screen: it is what separates "a challenge
+// aimed at you" from the green matchmaking rows above it at a glance.
+const ACCENT_VIOLET = '#5B4FD9';
+
 export default function TeamsTab(): React.ReactNode {
   const M = useMock();
+  // Reserve the tab bar plus the device's bottom inset, or the last card in
+  // this list sits underneath the bar.
+  const tabContentPadding = useTabContentPadding();
   const styles = useMemo(() => makeStyles(M), [M]);
   const router = useRouter();
+  const profile = useAuthStore((s) => s.profile);
+  const actions = usePendingActions();
   const teams = useMyTeamsOverview();
   const challenges = useMyChallenges();
   const booked = useAllMyBookedMatches();
-  const rows = teams.data ?? [];
+  const [sort, setSort] = useState<SortMode>('latest');
+
+  // The RPC's own order is "Latest", so that mode leaves it untouched.
+  const rows = useMemo(() => {
+    const list = teams.data ?? [];
+    return sort === 'name' ? [...list].sort((a, b) => a.name.localeCompare(b.name)) : list;
+  }, [teams.data, sort]);
 
   const upcomingMatchesCount = (booked.data ?? []).filter(
     (item) => item.match.status === 'open' || item.match.status === 'locked',
@@ -59,153 +97,282 @@ export default function TeamsTab(): React.ReactNode {
     );
   }, [challenges.data]);
 
+  const incomingCount = (challenges.data ?? []).filter(
+    (c) => c.direction === 'incoming' && c.i_can_respond,
+  ).length;
+  const pendingCount = (actions.data ?? []).length;
+  const unreadChats = (useChatInbox().data ?? []).reduce((sum, c) => sum + c.unread, 0);
+
+  // Finding an opponent opens the live radar directly.
+  const openRadar = (): void => {
+    if (activeChallenge) {
+      router.push({
+        pathname: '/match/create/searching',
+        params: { challengeId: activeChallenge.id },
+      });
+    } else {
+      router.push('/match/create/searching');
+    }
+  };
+
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
+    <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
       <ScrollView
-        contentContainerStyle={styles.scroll}
+        contentContainerStyle={[styles.scroll, { paddingBottom: tabContentPadding }]}
+        showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
             refreshing={teams.isRefetching}
-            onRefresh={() => void teams.refetch()}
+            onRefresh={() => {
+              void teams.refetch();
+              void challenges.refetch();
+              void booked.refetch();
+            }}
             tintColor={M.green}
           />
         }
       >
-        <AppText variant="title" color={M.text} style={{ fontSize: 24 }}>
-          Teams
-        </AppText>
-
-        {/* Live Radar banner for active team challenge */}
-        {activeChallenge ? (
+        {/* ---------------- Header ---------------- */}
+        <View style={styles.header}>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <AppText variant="title" color={M.text} style={styles.title}>
+              Teams
+            </AppText>
+            <AppText variant="caption" color={M.muted} style={{ fontSize: 13 }}>
+              Build. Play. Grow Together.
+            </AppText>
+          </View>
           <Pressable
-            onPress={() =>
-              router.push({
-                pathname: '/match/create/searching',
-                params: { challengeId: activeChallenge.id },
-              })
-            }
-            style={styles.radarBanner}
+            onPress={() => router.push('/(tabs)/activity')}
+            style={styles.headerBtn}
             accessibilityRole="button"
-            accessibilityLabel="Live radar search in progress. Tap to view radar."
+            accessibilityLabel={
+              pendingCount > 0 ? `Notifications, ${pendingCount} needing attention` : 'Notifications'
+            }
           >
-            <View style={styles.radarPill}>
-              <View style={styles.radarDot} />
-              <AppText variant="caption" color={M.limeInk} style={{ fontWeight: '800', fontSize: 10 }}>
-                LIVE RADAR
-              </AppText>
-            </View>
-            <View style={{ flex: 1, gap: 2 }}>
-              <AppText variant="label" color={M.text} numberOfLines={1} style={{ fontSize: 14 }}>
-                Searching for Opponent
-              </AppText>
-              <AppText variant="caption" color={M.muted} numberOfLines={1}>
-                {activeChallenge.match_name || 'Team Challenge'} · Tap to view radar
-              </AppText>
-            </View>
-            <IconChevron color={M.green} size={18} />
+            <IconBell color={M.text} size={20} />
+            {pendingCount > 0 ? <View style={styles.bellDot} /> : null}
           </Pressable>
-        ) : null}
-
-        <View style={styles.btnRow}>
           <Pressable
-            style={styles.ctaSolid}
+            onPress={() => router.push('/(tabs)/profile')}
+            style={styles.avatarBtn}
+            accessibilityRole="button"
+            accessibilityLabel="View profile"
+          >
+            {profile?.avatar_url ? (
+              <Image source={{ uri: profile.avatar_url }} style={styles.avatarImg} />
+            ) : (
+              <IconUser color={M.green} size={22} />
+            )}
+          </Pressable>
+        </View>
+
+        {/* ---------------- Create / Join ---------------- */}
+        <View style={styles.pairRow}>
+          <Pressable
+            style={styles.pairPressable}
             onPress={() => router.push('/teams/create')}
             accessibilityRole="button"
-            accessibilityLabel="Create a team"
+            accessibilityLabel="Create a team. Start your squad."
           >
-            <AppText variant="caption" color={M.ctaText}>
-              + Create team
-            </AppText>
+            <LinearGradient
+              colors={[M.greenDeep, M.green]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.createCard}
+            >
+              <View style={styles.pairTop}>
+                <View style={styles.createPlus}>
+                  <IconPlus color={M.green} size={20} strokeWidth={3} />
+                </View>
+                <View style={styles.createChevron}>
+                  <IconChevron color={M.limeInk} size={16} />
+                </View>
+              </View>
+              <AppText variant="label" color={M.limeInk} style={styles.pairTitle}>
+                Create Team
+              </AppText>
+              <AppText variant="caption" color={M.limeInk} style={styles.pairSubOnGreen}>
+                Start your squad
+              </AppText>
+            </LinearGradient>
           </Pressable>
+
           <Pressable
-            style={styles.ctaGhost}
+            style={styles.pairPressable}
             onPress={() => router.push('/teams/join')}
             accessibilityRole="button"
             accessibilityLabel="Join a team with an invite code"
           >
-            <AppText variant="caption" color={M.text}>
-              Join with code
-            </AppText>
-          </Pressable>
-        </View>
-
-        <View style={styles.btnRow}>
-          {/* Finding an opponent opens live radar dish directly */}
-          <Pressable
-            style={[styles.ctaGhost, activeChallenge ? styles.ctaActiveRadar : null]}
-            onPress={() => {
-              if (activeChallenge) {
-                router.push({
-                  pathname: '/match/create/searching',
-                  params: { challengeId: activeChallenge.id },
-                });
-              } else {
-                router.push('/match/create/searching');
-              }
-            }}
-            accessibilityRole="button"
-            accessibilityLabel="Find an opponent team on radar"
-          >
-            <AppText variant="caption" color={activeChallenge ? M.green : M.text} style={{ fontWeight: activeChallenge ? '700' : '500' }}>
-              {activeChallenge ? '⚡ View Live Radar' : 'Find opponent (Radar)'}
-            </AppText>
-          </Pressable>
-          <Pressable
-            style={styles.ctaGhost}
-            onPress={() => router.push('/teams/offers')}
-            accessibilityRole="button"
-            accessibilityLabel="Match offers"
-          >
-            <AppText variant="caption" color={M.text}>
-              Match offers
-            </AppText>
-          </Pressable>
-        </View>
-
-        {/* Booked & Scheduled Matches banner */}
-        <Pressable
-          style={styles.bookedBanner}
-          onPress={() => router.push('/teams/matches')}
-          accessibilityRole="button"
-          accessibilityLabel="View all booked and scheduled matches"
-        >
-          <View style={styles.bookedIconWrap}>
-            <IconCalendar color={M.limeInk} size={20} />
-          </View>
-          <View style={{ flex: 1, gap: 2 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <AppText variant="label" color={M.text} style={{ fontWeight: '700' }}>
-                Booked & Scheduled Matches
+            <View style={styles.joinCard}>
+              <View style={styles.pairTop}>
+                <IconTile size={40} color={TINT.amber.bg}>
+                  <IconUserPlus color={TINT.amber.fg} size={20} />
+                </IconTile>
+                <IconTile size={36} square>
+                  <IconChevron color={M.green} size={16} />
+                </IconTile>
+              </View>
+              <AppText variant="label" color={M.text} style={styles.pairTitle}>
+                Join with Code
               </AppText>
-              {upcomingMatchesCount > 0 ? (
-                <View style={styles.badgePill}>
-                  <AppText variant="caption" color={M.limeInk} style={{ fontWeight: '800', fontSize: 10 }}>
-                    {upcomingMatchesCount} UPCOMING
+              <AppText variant="caption" color={M.muted} style={{ fontSize: 13 }}>
+                Join an existing team
+              </AppText>
+            </View>
+          </Pressable>
+        </View>
+
+        {/* ---------------- Find Opponent (Radar) ---------------- */}
+        <Pressable
+          style={styles.radarCard}
+          onPress={openRadar}
+          accessibilityRole="button"
+          accessibilityLabel={
+            activeChallenge
+              ? 'Live radar search in progress. Tap to view radar.'
+              : 'Find an opponent team on radar'
+          }
+        >
+          <HillsArt variant="plain" width={150} />
+          <IconTile size={56} color={M.green}>
+            <IconTarget color={M.limeInk} size={30} />
+          </IconTile>
+          <View style={styles.rowText}>
+            <View style={styles.rowTitleLine}>
+              <AppText variant="label" color={M.text} style={styles.rowTitle} numberOfLines={1}>
+                {activeChallenge ? 'Searching for Opponent' : 'Find Opponent (Radar)'}
+              </AppText>
+              {activeChallenge ? (
+                <View style={styles.livePill}>
+                  <View style={styles.liveDot} />
+                  <AppText variant="caption" color={M.limeInk} style={styles.pillText}>
+                    LIVE
                   </AppText>
                 </View>
               ) : null}
             </View>
-            <AppText variant="caption" color={M.muted}>
-              View fixtures, match timings, lineups & scorecards
+            <AppText variant="caption" color={M.muted} numberOfLines={1} style={{ fontSize: 13 }}>
+              {activeChallenge
+                ? `${activeChallenge.match_name || 'Team Challenge'} · Tap to view radar`
+                : 'Discover nearby teams and challenge them'}
             </AppText>
           </View>
           <IconChevron color={M.green} size={18} />
         </Pressable>
 
+        {/* ---------------- Booked & Scheduled ---------------- */}
         <Pressable
-          style={styles.ctaGhostWide}
+          style={styles.rowCard}
+          onPress={() => router.push('/teams/matches')}
+          accessibilityRole="button"
+          accessibilityLabel="View all booked and scheduled games"
+        >
+          <IconTile size={52} color={TINT.blue.fg}>
+            <IconCalendar color="#FFFFFF" size={24} />
+          </IconTile>
+          <View style={styles.rowText}>
+            <View style={styles.rowTitleLine}>
+              <AppText variant="label" color={M.text} style={styles.rowTitle} numberOfLines={2}>
+                Booked & Scheduled Games
+              </AppText>
+              {upcomingMatchesCount > 0 ? (
+                <View style={styles.countPill}>
+                  <AppText variant="caption" color={M.green} style={styles.pillText}>
+                    {upcomingMatchesCount}
+                  </AppText>
+                </View>
+              ) : null}
+            </View>
+            <AppText variant="caption" color={M.muted} numberOfLines={2} style={{ fontSize: 13 }}>
+              View fixtures, game timings, lineups & scorecards
+            </AppText>
+          </View>
+          <IconChevron color={M.green} size={18} />
+        </Pressable>
+
+        {/* ---------------- Directed Challenges ---------------- */}
+        <Pressable
+          style={styles.rowCard}
           onPress={() => router.push('/teams/challenges')}
           accessibilityRole="button"
           accessibilityLabel="Directed challenges"
         >
-          <AppText variant="caption" color={M.text}>
-            Directed challenges
-          </AppText>
+          <IconTile size={52} color={ACCENT_VIOLET}>
+            <IconSwords color="#FFFFFF" size={24} />
+          </IconTile>
+          <View style={styles.rowText}>
+            <View style={styles.rowTitleLine}>
+              <AppText variant="label" color={M.text} style={styles.rowTitle} numberOfLines={1}>
+                Directed Challenges
+              </AppText>
+              {incomingCount > 0 ? (
+                <View style={styles.countPill}>
+                  <AppText variant="caption" color={M.green} style={styles.pillText}>
+                    {incomingCount} NEW
+                  </AppText>
+                </View>
+              ) : null}
+            </View>
+            <AppText variant="caption" color={M.muted} numberOfLines={2} style={{ fontSize: 13 }}>
+              View and respond to challenges from other teams
+            </AppText>
+          </View>
+          <IconChevron color={M.green} size={18} />
         </Pressable>
 
-        <AppText variant="caption" color={M.muted} style={styles.section}>
-          MY TEAMS{rows.length > 0 ? ` (${rows.length})` : ''}
-        </AppText>
+        {/* ---------------- Captain chats ---------------- */}
+        <Pressable
+          style={styles.rowCard}
+          onPress={() => router.push('/chat')}
+          accessibilityRole="button"
+          accessibilityLabel={
+            unreadChats > 0 ? `Captain chats, ${unreadChats} unread` : 'Captain chats'
+          }
+        >
+          <IconTile size={52} color={TINT.teal.fg}>
+            <IconSend color="#FFFFFF" size={22} />
+          </IconTile>
+          <View style={styles.rowText}>
+            <View style={styles.rowTitleLine}>
+              <AppText variant="label" color={M.text} style={styles.rowTitle} numberOfLines={1}>
+                Captain Chats
+              </AppText>
+              {unreadChats > 0 ? (
+                <View style={styles.unreadPill}>
+                  <AppText variant="caption" color="#FFFFFF" style={styles.pillText}>
+                    {unreadChats > 99 ? '99+' : unreadChats}
+                  </AppText>
+                </View>
+              ) : null}
+            </View>
+            <AppText variant="caption" color={M.muted} numberOfLines={2} style={{ fontSize: 13 }}>
+              Message opposing captains before and after a game is fixed
+            </AppText>
+          </View>
+          <IconChevron color={M.green} size={18} />
+        </Pressable>
+
+        {/* ---------------- My teams ---------------- */}
+        <View style={styles.sectionRow}>
+          <AppText variant="label" color={M.muted} style={styles.section}>
+            MY TEAMS{rows.length > 0 ? ` (${rows.length})` : ''}
+          </AppText>
+          {rows.length > 1 ? (
+            <Pressable
+              onPress={() => setSort((v) => (v === 'latest' ? 'name' : 'latest'))}
+              hitSlop={10}
+              style={styles.sortBtn}
+              accessibilityRole="button"
+              accessibilityLabel={`Sorted by ${sort === 'latest' ? 'latest' : 'name'}. Tap to change.`}
+            >
+              <IconSort color={M.muted} size={16} />
+              <AppText variant="caption" color={M.muted} style={{ fontSize: 13 }}>
+                {sort === 'latest' ? 'Latest' : 'A–Z'}
+              </AppText>
+            </Pressable>
+          ) : null}
+        </View>
 
         {teams.isLoading ? (
           <ActivityIndicator color={M.green} style={{ marginTop: S.md }} />
@@ -258,7 +425,6 @@ function TeamCard({
 }): React.ReactNode {
   const router = useRouter();
   const sportLabel = useSportLabel();
-  const played = team.matches_played > 0;
 
   return (
     <Pressable
@@ -272,46 +438,68 @@ function TeamCard({
           <Image source={{ uri: team.logo_url }} style={styles.logo} />
         ) : (
           <View style={[styles.logo, styles.logoFallback]}>
-            <AppText variant="label" color={M.green}>
+            <AppText variant="heading" color={M.limeInk}>
               {team.name.slice(0, 1).toUpperCase()}
             </AppText>
           </View>
         )}
         <View style={{ flex: 1, minWidth: 0 }}>
-          <AppText variant="label" color={M.text} numberOfLines={1}>
+          <AppText variant="heading" color={M.text} numberOfLines={1} style={{ fontSize: 18 }}>
             {team.name}
           </AppText>
-          <AppText variant="caption" color={M.muted} numberOfLines={1}>
+          <AppText variant="caption" color={M.muted} numberOfLines={1} style={{ fontSize: 13 }}>
             {sportLabel(team.sport)} · {team.player_count}{' '}
             {team.player_count === 1 ? 'player' : 'players'}
             {team.i_am_owner ? ' · Captain' : ''}
           </AppText>
         </View>
-        <AppText color={M.green}>›</AppText>
+        {/* Squad size against the declared format; just the size when there is none. */}
+        <View style={styles.sizePill}>
+          <IconUsers color={M.green} size={14} />
+          <AppText variant="caption" color={M.green} style={styles.pillText}>
+            {team.target_size ? `${team.player_count}/${team.target_size}` : team.player_count}
+          </AppText>
+        </View>
+        <IconChevron color={M.text} size={18} />
       </View>
 
-      {played ? (
-        <View style={styles.statRow}>
-          <Mini label="Played" value={team.matches_played} M={M} styles={styles} />
-          <Mini label="Record" value={record(team)} M={M} styles={styles} />
-          <Mini label="Win rate" value={`${team.win_rate}%`} M={M} styles={styles} />
-        </View>
-      ) : (
-        // A row of zeros reads as broken data. Say the true thing instead.
-        <AppText variant="caption" color={M.faint} style={{ marginTop: S.sm }}>
-          No matches played yet
-        </AppText>
-      )}
+      <View style={styles.statRow}>
+        <Mini
+          icon={<IconGamepad color={TINT.blue.fg} size={18} />}
+          label="Games"
+          value={team.matches_played}
+          M={M}
+          styles={styles}
+        />
+        <View style={styles.statDivider} />
+        <Mini
+          icon={<IconTrophy color={TINT.amber.fg} size={18} />}
+          label={team.matches_played > 0 ? `Wins · ${record(team)}` : 'Wins'}
+          value={team.wins}
+          M={M}
+          styles={styles}
+        />
+        <View style={styles.statDivider} />
+        <Mini
+          icon={<IconBarChart color={TINT.green.fg} size={18} />}
+          label="Win Rate"
+          value={`${team.win_rate}%`}
+          M={M}
+          styles={styles}
+        />
+      </View>
     </Pressable>
   );
 }
 
 function Mini({
+  icon,
   label,
   value,
   M,
   styles,
 }: {
+  icon: React.ReactNode;
   label: string;
   value: string | number;
   M: MockPalette;
@@ -319,11 +507,14 @@ function Mini({
 }): React.ReactNode {
   return (
     <View style={styles.mini}>
-      <AppText variant="caption" color={M.muted}>
+      <View style={styles.miniTop}>
+        {icon}
+        <AppText variant="label" color={M.text} style={{ fontSize: 17 }}>
+          {value}
+        </AppText>
+      </View>
+      <AppText variant="caption" color={M.muted} numberOfLines={1} style={{ fontSize: 12 }}>
         {label}
-      </AppText>
-      <AppText variant="label" color={M.text}>
-        {value}
       </AppText>
     </View>
   );
@@ -332,122 +523,190 @@ function Mini({
 const makeStyles = (M: MockPalette) =>
   StyleSheet.create({
     safe: { flex: 1, backgroundColor: M.bg },
-    scroll: { padding: S.md, paddingBottom: S.xl, gap: S.sm },
-    section: { marginTop: S.md, letterSpacing: 0.5 },
-    btnRow: { flexDirection: 'row', gap: S.sm },
-    // minHeight 44 is the iOS HIG / Android touch-target floor. Padding alone
-    // left these pills around 34pt tall.
-    ctaSolid: {
-      flex: 1,
-      minHeight: 44,
-      paddingVertical: S.sm,
-      paddingHorizontal: S.sm,
-      borderRadius: R.pill,
-      backgroundColor: M.lime,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    ctaGhost: {
-      flex: 1,
-      minHeight: 44,
-      paddingVertical: S.sm,
-      paddingHorizontal: S.sm,
-      borderRadius: R.pill,
-      borderWidth: 1,
-      borderColor: M.border,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    ctaGhostWide: {
-      minHeight: 44,
-      paddingVertical: S.sm,
-      borderRadius: R.pill,
-      borderWidth: 1,
-      borderColor: M.border,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    card: {
+    scroll: { padding: S.md, paddingBottom: S.xl, gap: 12 },
+
+    header: { flexDirection: 'row', alignItems: 'center', gap: S.sm, marginBottom: S.xs },
+    title: { fontSize: 30, lineHeight: 36 },
+    // 44 is the iOS HIG / Android touch-target floor.
+    headerBtn: {
+      width: 44,
+      height: 44,
+      borderRadius: 22,
       backgroundColor: M.card,
-      borderRadius: R.md,
-      borderWidth: 1,
-      borderColor: M.border,
-      padding: S.md,
-      gap: S.xs,
-    },
-    cardHead: { flexDirection: 'row', alignItems: 'center', gap: S.sm },
-    logo: { width: 44, height: 44, borderRadius: 22 },
-    logoFallback: {
-      backgroundColor: M.cardHi,
       borderWidth: 1,
       borderColor: M.border,
       alignItems: 'center',
       justifyContent: 'center',
     },
-    statRow: {
-      flexDirection: 'row',
-      marginTop: S.sm,
-      paddingTop: S.sm,
-      borderTopWidth: 1,
-      borderTopColor: M.border,
-    },
-    mini: { flex: 1, alignItems: 'center', gap: 2 },
-    retry: { minHeight: 44, justifyContent: 'center' },
-    ctaActiveRadar: {
-      borderColor: M.green,
-      backgroundColor: 'rgba(34, 197, 94, 0.12)',
-    },
-    radarBanner: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: S.sm,
-      padding: S.md,
-      borderRadius: R.lg,
+    bellDot: {
+      position: 'absolute',
+      top: 9,
+      right: 10,
+      width: 9,
+      height: 9,
+      borderRadius: 5,
+      backgroundColor: M.danger,
       borderWidth: 1.5,
+      borderColor: M.card,
+    },
+    avatarBtn: {
+      width: 48,
+      height: 48,
+      borderRadius: 24,
+      borderWidth: 2,
       borderColor: M.green,
-      backgroundColor: M.card,
-      marginBottom: S.xs,
+      backgroundColor: M.chip,
+      alignItems: 'center',
+      justifyContent: 'center',
+      overflow: 'hidden',
     },
-    radarPill: {
+    avatarImg: { width: '100%', height: '100%' },
+
+    pairRow: { flexDirection: 'row', gap: 12 },
+    pairPressable: { flex: 1 },
+    pairTop: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 6,
-      paddingHorizontal: 8,
-      paddingVertical: 4,
-      borderRadius: R.pill,
-      backgroundColor: M.green,
+      justifyContent: 'space-between',
+      marginBottom: S.sm + 2,
     },
-    radarDot: {
-      width: 6,
-      height: 6,
-      borderRadius: 3,
-      backgroundColor: M.limeInk,
+    pairTitle: {
+      fontSize: 17,
+      lineHeight: 22,
+      fontFamily: 'SpaceGrotesk_700Bold',
+      fontWeight: '700',
     },
-    bookedBanner: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: S.sm,
+    pairSubOnGreen: { fontSize: 13, opacity: 0.85 },
+    createCard: {
+      borderRadius: 20,
       padding: S.md,
-      borderRadius: R.lg,
-      borderWidth: 1.5,
-      borderColor: M.border,
-      backgroundColor: M.card,
-      marginBottom: S.xs,
+      minHeight: 118,
+      shadowColor: M.green,
+      shadowOffset: { width: 0, height: 6 },
+      shadowOpacity: 0.25,
+      shadowRadius: 12,
+      elevation: 5,
     },
-    bookedIconWrap: {
+    createPlus: {
       width: 40,
       height: 40,
       borderRadius: 20,
-      backgroundColor: M.green,
+      backgroundColor: M.limeInk,
       alignItems: 'center',
       justifyContent: 'center',
     },
-    badgePill: {
+    createChevron: {
+      width: 36,
+      height: 36,
+      borderRadius: 10,
+      backgroundColor: 'rgba(255,255,255,0.16)',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    joinCard: {
+      borderRadius: 20,
+      padding: S.md,
+      minHeight: 118,
+      backgroundColor: M.card,
+      borderWidth: 1,
+      borderColor: M.border,
+    },
+
+    radarCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      padding: S.md,
+      borderRadius: 20,
+      borderWidth: 1,
+      borderColor: M.border,
+      backgroundColor: M.chip,
+      overflow: 'hidden',
+    },
+    rowCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      padding: S.md,
+      borderRadius: 20,
+      borderWidth: 1,
+      borderColor: M.border,
+      backgroundColor: M.card,
+    },
+    rowText: { flex: 1, minWidth: 0, gap: 2 },
+    rowTitleLine: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+    rowTitle: {
+      fontSize: 16,
+      lineHeight: 21,
+      fontFamily: 'SpaceGrotesk_700Bold',
+      fontWeight: '700',
+      flexShrink: 1,
+    },
+    livePill: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: R.pill,
+      backgroundColor: M.green,
+    },
+    liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: M.limeInk },
+    countPill: {
       paddingHorizontal: 8,
       paddingVertical: 2,
       borderRadius: R.pill,
-      backgroundColor: 'rgba(34, 197, 94, 0.16)',
-      borderWidth: 1,
-      borderColor: M.green,
+      backgroundColor: M.chip,
     },
+    unreadPill: {
+      minWidth: 22,
+      alignItems: 'center',
+      paddingHorizontal: 7,
+      paddingVertical: 2,
+      borderRadius: R.pill,
+      backgroundColor: M.danger,
+    },
+    pillText: { fontWeight: '800', fontSize: 11 },
+
+    sectionRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginTop: S.md,
+    },
+    section: { letterSpacing: 0.6, fontSize: 14 },
+    sortBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, minHeight: 32 },
+
+    card: {
+      backgroundColor: M.card,
+      borderRadius: 20,
+      borderWidth: 1,
+      borderColor: M.border,
+      padding: S.md,
+      gap: 12,
+    },
+    cardHead: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+    logo: { width: 52, height: 52, borderRadius: 26 },
+    logoFallback: { backgroundColor: M.green, alignItems: 'center', justifyContent: 'center' },
+    sizePill: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      paddingHorizontal: 10,
+      paddingVertical: 5,
+      borderRadius: R.pill,
+      backgroundColor: M.chip,
+    },
+    statRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: M.cardHi,
+      borderRadius: R.md,
+      paddingVertical: 10,
+      paddingHorizontal: S.sm,
+    },
+    statDivider: { width: 1, alignSelf: 'stretch', backgroundColor: M.border },
+    mini: { flex: 1, alignItems: 'center', gap: 2, paddingHorizontal: 4 },
+    miniTop: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+    retry: { minHeight: 44, justifyContent: 'center' },
   });

@@ -1,0 +1,29 @@
+appId: com.asrdigi.matchup
+---
+# Flow 8: Global Match & Open Challenges Discovery
+# Verifies unblocked browsing without distance gate or squad lock
+
+- launchApp
+
+# 1. Open Games Tab
+- tapOn: "Matches|Games"
+- assertVisible: "Games near you|Matches near you"
+
+# 2. Verify Action Buttons
+- assertVisible: "Create Game"
+- assertVisible: "Join with code"
+
+# 3. Test Distance Filter Chips
+- assertVisible: "SEARCH DISTANCE"
+- tapOn: "50 km|All|25 km"
+
+# 4. Verify Open Challenges Rail (Browseable by all users)
+- runFlow:
+    when:
+      visible: ".*LOOKING FOR OPPONENTS.*"
+    commands:
+      - assertVisible: ".*LOOKING FOR OPPONENTS.*"
+      - scroll
+
+# 5. Verify Public Match Feed
+- assertVisible: ".*Players|.*left|.*spots.*|Be the first — create one!"

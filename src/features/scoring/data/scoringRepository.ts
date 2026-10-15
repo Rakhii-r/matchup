@@ -5,17 +5,22 @@ import type {
   BattingRow,
   BowlingRow,
   DeliveryInput,
+  Innings,
   LiveState,
   OverBall,
 } from '@features/scoring/domain/scoringSchema';
 
 const SCORING_ERRORS: [token: string, code: AppErrorCode, message: string][] = [
   ['NOT_AUTHENTICATED', 'unauthorized', 'Please sign in again.'],
-  ['MATCH_NOT_FOUND', 'not_found', 'That match no longer exists.'],
-  ['MATCH_CANCELLED', 'conflict', 'This match was cancelled.'],
+  ['MATCH_NOT_FOUND', 'not_found', 'That game no longer exists.'],
+  ['MATCH_CANCELLED', 'conflict', 'This game was cancelled.'],
   ['TOSS_NOT_DECIDED', 'validation', 'Do the toss before starting the innings.'],
-  ['NOT_ALLOWED_TO_SCORE', 'forbidden', 'Only a captain or the organiser can start scoring.'],
-  ['NOT_THE_SCORER', 'forbidden', 'Someone else is scoring this match.'],
+  // start_innings is organiser-only as of the creator_only_toss_and_scoring
+  // migration; NOT_ALLOWED_TO_SCORE is kept for installed builds still talking
+  // to the older function.
+  ['NOT_THE_ORGANISER', 'forbidden', 'Only the game organiser scores. You can watch the score here.'],
+  ['NOT_ALLOWED_TO_SCORE', 'forbidden', 'Only the game organiser can start scoring.'],
+  ['NOT_THE_SCORER', 'forbidden', 'Someone else is scoring this game.'],
   ['INNINGS_NOT_FOUND', 'not_found', 'That innings no longer exists.'],
   ['INNINGS_ENDED', 'conflict', 'This innings is already finished.'],
   ['FIRST_INNINGS_NOT_ENDED', 'conflict', 'End the first innings first.'],
@@ -41,6 +46,28 @@ export const scoringRepository = {
     const { data, error } = await supabase.rpc('get_live_state', { in_match_id: matchId });
     if (error) throw scoringError(error);
     return data?.[0] ?? null;
+  },
+
+  /**
+   * Every innings of the match, oldest first.
+   *
+   * `get_live_state` deliberately returns only the innings in play, which is
+   * all the live screen needs but half a scorecard. There is no read model for
+   * the whole match, so this reads the table directly — `innings_select` lets
+   * the organiser and anyone on the sheet see it, the same audience the
+   * SECURITY DEFINER read models serve, so nothing is widened here.
+   *
+   * Team NAMES are not on these rows (`teams` is members-only); the screen
+   * labels them from get_match_sides.
+   */
+  async listInnings(matchId: string): Promise<Innings[]> {
+    const { data, error } = await supabase
+      .from('innings')
+      .select('*')
+      .eq('match_id', matchId)
+      .order('number', { ascending: true });
+    if (error) throw scoringError(error);
+    return data ?? [];
   },
 
   async getThisOver(inningsId: string): Promise<OverBall[]> {
@@ -95,6 +122,23 @@ export const scoringRepository = {
   async endInnings(inningsId: string): Promise<void> {
     const { error } = await supabase.rpc('end_innings', { in_innings_id: inningsId });
     if (error) throw scoringError(error);
+  },
+
+  /**
+   * Award (or clear, with null) Player of the Game after the fact.
+   *
+   * Separate from finishMatch because the second innings auto-completes inside
+   * record_delivery — there is often no "Finish" tap to attach a picker to, so
+   * the award is made on the result screen once the game is already over.
+   * `set_motm` is organiser-or-scorer only and refuses a user who was not on
+   * the sheet (NOT_A_MATCH_PLAYER).
+   */
+  async setMotm(matchId: string, motmUserId: string | null): Promise<void> {
+    const { error } = await supabase.rpc('set_motm', {
+      in_match_id: matchId,
+      in_user_id: motmUserId,
+    });
+    if (error) throw toAppError(error);
   },
 
   async finishMatch(matchId: string, motmUserId: string | null): Promise<void> {

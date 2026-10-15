@@ -26,6 +26,7 @@ export class AppError extends Error {
 }
 
 interface SupabaseLikeError {
+  name?: string;
   message?: string;
   code?: string;
   status?: number;
@@ -36,7 +37,7 @@ const USER_MESSAGE: Record<AppErrorCode, string> = {
   unauthorized: 'Please sign in to continue.',
   forbidden: "You don't have permission to do that.",
   not_found: "We couldn't find what you were looking for.",
-  conflict: 'This time slot or team already has a match scheduled. Please choose a different time or date.',
+  conflict: 'This time slot or team already has a game scheduled. Please choose a different time or date.',
   validation: 'Some details are invalid. Please review and try again.',
   rate_limited: 'Too many attempts. Please wait a moment and try again.',
   unknown: 'Something went wrong. Please try again.',
@@ -50,29 +51,44 @@ export function toAppError(error: unknown): AppError {
   const raw = (e.message ?? '').toLowerCase();
 
   // A mobile build can be updated before its accompanying Supabase migration.
-  // Make that deployment mismatch actionable instead of hiding it behind the
-  // generic unknown-error message.
+  // The user cannot act on that, so the copy says only that it is temporary;
+  // the raw error travels in `cause` for whoever reads the logs.
   if (
     e.code === 'PGRST204' ||
     (raw.includes('match_name') && (raw.includes('column') || raw.includes('schema cache')))
   ) {
     return new AppError(
       'unknown',
-      'The match database update is not installed yet. Please apply the latest Supabase migrations.',
+      'This feature is being updated. Please try again in a little while.',
       error,
     );
+  }
+
+  if (
+    e.code === '23P01' ||
+    e.code === 'SLOT_ALREADY_TAKEN' ||
+    raw.includes('slot_already_taken') ||
+    raw.includes('venue_bookings_no_double_booking')
+  ) {
+    return new AppError('conflict', 'Slot already taken', error);
   }
 
   if (raw.includes('team_schedule_conflict') || raw.includes('player_schedule_conflict') || raw.includes('opponent_schedule_conflict')) {
     return new AppError(
       'conflict',
-      'This time slot already has an active match or open challenge scheduled. Please pick a different time or date.',
+      'This time slot already has an active game or open challenge scheduled. Please pick a different time or date.',
       error,
     );
   }
 
   let code: AppErrorCode = 'unknown';
-  if (raw.includes('network') || raw.includes('fetch')) code = 'network';
+  // 'abort' is the request timeout in supabaseClient firing: the server never answered.
+  if (e.name === 'AbortError' || raw.includes('network') || raw.includes('fetch') || raw.includes('abort'))
+    code = 'network';
+  // Ahead of the OTP rule below: GoTrue's rate-limit and SMS-provider failures
+  // mention "otp" too, and neither is something the user typed wrong.
+  else if (status === 429) code = 'rate_limited';
+  else if (status !== undefined && status >= 500) code = 'unknown';
   // GoTrue returns HTTP 403 for expired/invalid OTP tokens too (error_code: 'otp_expired').
   // That is a user input problem, not an authorisation failure — must be checked before
   // the generic 403 => forbidden mapping below, or it renders as "no permission".
@@ -83,7 +99,6 @@ export function toAppError(error: unknown): AppError {
   else if (status === 404 || e.code === 'PGRST116') code = 'not_found';
   else if (status === 409 || e.code === '23505') code = 'conflict'; // unique_violation
   else if (status === 422 || e.code === '23514') code = 'validation';
-  else if (status === 429) code = 'rate_limited';
 
   return new AppError(code, USER_MESSAGE[code], error);
 }

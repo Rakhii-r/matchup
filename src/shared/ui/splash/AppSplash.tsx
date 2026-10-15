@@ -7,13 +7,12 @@
  * Intentionally has NO useTheme() dependency — always renders dark.
  */
 import { useEffect, useMemo, useRef } from 'react';
-import { StyleSheet, Animated, Dimensions } from 'react-native';
+import { StyleSheet, Animated } from 'react-native';
 
 import { SplashBackground } from './SplashBackground';
 import { AnimatedLogo } from './AnimatedLogo';
 import { LoadingIndicator } from './LoadingIndicator';
 
-const { width: W, height: H } = Dimensions.get('window');
 
 interface AppSplashProps {
   visible: boolean;
@@ -59,15 +58,20 @@ export function AppSplash({ visible, onHidden }: AppSplashProps): React.ReactNod
 
 const styles = StyleSheet.create({
   container: {
+    /*
+      left/right/top/bottom: 0 already stretches this to the parent. The
+      `width`/`height` that used to sit here came from a module-scope
+      `Dimensions.get('window')` — captured once at import, so it kept the
+      launch-time size through a rotation or a split-screen resize and left a
+      strip of the app visible beside the splash.
+    */
     position: 'absolute',
     left: 0,
     right: 0,
     top: 0,
     bottom: 0,
-    width: W,
-    height: H,
     zIndex: 9999,
-    backgroundColor: '#040D18',
+    backgroundColor: '#003D29',
     alignItems: 'center',
     justifyContent: 'center',
   },

@@ -70,6 +70,16 @@ export function useCreateProfile(): UseCreateProfile {
         analytics.capture('profile_created');
         return true;
       } catch (e) {
+        // A duplicate key means the profile already exists — this screen was
+        // reached by mistake, or a first attempt landed but its response was
+        // lost. Adopt the stored row instead of reporting a conflict.
+        if (e instanceof AppError && e.code === 'conflict') {
+          const existing = await profileRepository.getMine(userId).catch(() => null);
+          if (existing) {
+            setProfile(existing);
+            return true;
+          }
+        }
         setError(e instanceof AppError ? e.message : 'Could not save your profile.');
         return false;
       } finally {

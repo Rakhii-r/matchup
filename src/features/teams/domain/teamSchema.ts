@@ -13,6 +13,7 @@ export interface TeamMemberWithProfile extends TeamMember {
 export const CreateTeamSchema = z.object({
   name: z.string().trim().min(2, 'Name must be at least 2 characters').max(50),
   sport: z.enum(['box_cricket', 'badminton']),
+  description: z.string().max(500).optional(),
 });
 
 export type CreateTeamForm = z.infer<typeof CreateTeamSchema>;
@@ -25,8 +26,9 @@ export const TeamInviteCodeSchema = z.object({
     .regex(/^[A-Z0-9]{6}$/, 'Enter the 6-character code'),
 });
 
+// A squad has one leader and everybody else is a player. 'owner' is the column
+// value; "Captain" is what it has always been called in the UI.
 export const TEAM_ROLE_LABEL: Record<TeamRole, string> = {
-  owner: 'Owner',
-  vice_captain: 'Vice captain',
+  owner: 'Captain',
   member: 'Member',
 };

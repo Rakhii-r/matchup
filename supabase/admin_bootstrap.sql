@@ -5,17 +5,23 @@
 -- from the app. Run this ONCE in the Supabase SQL editor (which uses the service
 -- role and bypasses RLS), or via `supabase db` against your local stack.
 --
--- After this, that superadmin can grant/revoke roles in-app.
+-- After this, that superadmin can access the Admin Portal in-app.
 -- ============================================================================
 
 -- 1) Find the target user's id (the person must have signed up + created a profile):
---    select id, full_name, phone from public.profiles where phone = '+9198XXXXXXXX';
+--    select id, full_name, phone from public.profiles where phone = '+91XXXXXXXXXX';
 
--- 2) Grant superadmin (replace the UUID):
-insert into public.user_roles (user_id, role)
-values ('00000000-0000-0000-0000-000000000000', 'superadmin')
-on conflict (user_id, role) do nothing;
+-- 2) Grant superadmin role (replace 'TARGET_USER_UUID' with the actual profile UUID):
+insert into public.user_roles (user_id, role_id)
+select 
+  'TARGET_USER_UUID'::uuid, 
+  r.id
+from public.roles r
+where r.name = 'superadmin'
+on conflict (user_id, role_id) do nothing;
 
 -- 3) Verify:
---    select ur.role, p.full_name, p.phone
---    from public.user_roles ur join public.profiles p on p.id = ur.user_id;
+--    select p.full_name, p.phone, r.name as role
+--    from public.user_roles ur 
+--    join public.roles r on r.id = ur.role_id
+--    join public.profiles p on p.id = ur.user_id;

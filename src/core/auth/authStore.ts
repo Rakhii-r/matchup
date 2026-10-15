@@ -5,7 +5,12 @@ import type { AppRole, Database } from '@shared/types/database.types';
 
 export type Profile = Database['public']['Tables']['profiles']['Row'];
 
-export type AuthStatus = 'loading' | 'signed_out' | 'needs_profile' | 'signed_in';
+/**
+ * `offline` means "we could not find out": a stored session whose refresh
+ * failed, or a profile fetch that kept failing. It is deliberately distinct from
+ * `signed_out` and `needs_profile`, which are both things the server told us.
+ */
+export type AuthStatus = 'loading' | 'signed_out' | 'needs_profile' | 'signed_in' | 'offline';
 
 interface AuthState {
   status: AuthStatus;
@@ -18,6 +23,7 @@ interface AuthState {
   setSession: (session: Session | null) => void;
   setProfile: (profile: Profile | null) => void;
   setRoles: (roles: AppRole[]) => void;
+  setOffline: () => void;
   reset: () => void;
 }
 
@@ -36,7 +42,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   setSession: (session) =>
     set(() => ({
       session,
-      status: session ? (get().profile ? 'signed_in' : 'needs_profile') : 'signed_out',
+      status: session ? (get().profile ? 'signed_in' : 'loading') : 'signed_out',
     })),
   setProfile: (profile) =>
     set((state) => ({
@@ -49,6 +55,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       isAdmin: roles.includes('moderator') || roles.includes('superadmin'),
       isSuperadmin: roles.includes('superadmin'),
     })),
+  setOffline: () => set(() => ({ status: 'offline' })),
   reset: () =>
     set(() => ({
       status: 'signed_out',

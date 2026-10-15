@@ -46,7 +46,10 @@ import { getCurrentCoords } from '@core/location/location';
 import { AppError } from '@core/errors/AppError';
 import { TOUCH } from '@features/matches/presentation/CreateMatchWizardUI';
 import {
-  useAcceptOpenChallenge,
+  DEFAULT_SLOT_DURATION_MIN,
+  addMinutesHHmm,
+} from '@features/matches/presentation/useCreateMatchWizard';
+import {
   useApplyToChallenge,
   useCancelChallenge,
   useChallenge,
@@ -147,8 +150,8 @@ function CenterSixfourBall({ size = 58 }: { size?: number }): React.ReactNode {
         justifyContent: 'center',
         backgroundColor: '#050C07',
         borderWidth: 2,
-        borderColor: '#98BB01',
-        shadowColor: '#98BB01',
+        borderColor: '#10B981',
+        shadowColor: '#10B981',
         shadowOffset: { width: 0, height: 0 },
         shadowOpacity: 0.85,
         shadowRadius: 14,
@@ -182,8 +185,8 @@ function CricketBall({ size = 48 }: { size?: number }): React.ReactNode {
           <Stop offset="100%" stopColor="#3E0000" stopOpacity="1" />
         </RadialGradient>
         <RadialGradient id="ballAura" cx="50%" cy="50%" r="50%">
-          <Stop offset="65%" stopColor="#98BB01" stopOpacity="0.45" />
-          <Stop offset="100%" stopColor="#98BB01" stopOpacity="0" />
+          <Stop offset="65%" stopColor="#10B981" stopOpacity="0.45" />
+          <Stop offset="100%" stopColor="#10B981" stopOpacity="0" />
         </RadialGradient>
       </Defs>
 
@@ -253,9 +256,9 @@ function CricketRadarDishGrid({ size }: { size: number }): React.ReactNode {
           <Stop offset="100%" stopColor="#020503" stopOpacity="1" />
         </RadialGradient>
         <RadialGradient id="centerGlow" cx="50%" cy="50%" r="50%">
-          <Stop offset="0%" stopColor="#98BB01" stopOpacity="0.4" />
-          <Stop offset="45%" stopColor="#98BB01" stopOpacity="0.12" />
-          <Stop offset="100%" stopColor="#98BB01" stopOpacity="0" />
+          <Stop offset="0%" stopColor="#10B981" stopOpacity="0.4" />
+          <Stop offset="45%" stopColor="#10B981" stopOpacity="0.12" />
+          <Stop offset="100%" stopColor="#10B981" stopOpacity="0" />
         </RadialGradient>
       </Defs>
 
@@ -351,8 +354,8 @@ function RadarSweepBeam({ size }: { size: number }): React.ReactNode {
         <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
           <Defs>
             <SvgLinearGradient id="sweepTrail" x1="0%" y1="0%" x2="100%" y2="0%">
-              <Stop offset="0%" stopColor="#98BB01" stopOpacity="0" />
-              <Stop offset="65%" stopColor="#98BB01" stopOpacity="0.22" />
+              <Stop offset="0%" stopColor="#10B981" stopOpacity="0" />
+              <Stop offset="65%" stopColor="#10B981" stopOpacity="0.22" />
               <Stop offset="100%" stopColor="#4ADE80" stopOpacity="0.45" />
             </SvgLinearGradient>
           </Defs>
@@ -419,8 +422,8 @@ function RadarPulseRing({ size, delay = 0 }: { size: number; delay?: number }): 
           height: size,
           borderRadius: 999,
           borderWidth: 1.8,
-          borderColor: '#98BB01',
-          shadowColor: '#98BB01',
+          borderColor: '#10B981',
+          shadowColor: '#10B981',
           shadowOffset: { width: 0, height: 0 },
           shadowOpacity: 0.7,
           shadowRadius: 10,
@@ -460,7 +463,6 @@ export default function SearchingScreen(): React.ReactNode {
   const isOpen = challenge.data?.status === 'open';
   const candidates = useChallengeCandidatesFull(challengeId, isOpen);
   const cancel = useCancelChallenge();
-  const acceptOpen = useAcceptOpenChallenge();
   const declineOpen = useDeclineOpenChallenge();
 
   // Teams and venues for broadcast
@@ -602,9 +604,10 @@ export default function SearchingScreen(): React.ReactNode {
         areaName,
         dayOffset,
         timeHHmm,
+        // The booked slot bounds the session; the schema requires an end time.
+        endTimeHHmm: addMinutesHHmm(timeHHmm, DEFAULT_SLOT_DURATION_MIN),
         totalSlots,
         radiusM: selectedRadiusM,
-        gameType: 'friendly',
         lat: curCoords?.lat ?? profile?.home_lat ?? undefined,
         lng: curCoords?.lng ?? profile?.home_lng ?? undefined,
       },
@@ -626,24 +629,17 @@ export default function SearchingScreen(): React.ReactNode {
     return rows.filter((r) => r.status === 'interested');
   }, [rows]);
 
+  /*
+    Accepting seats a lineup in the same transaction (`accept_open_challenge`
+    takes one), and the lineup picker lives on the poster's Match Offers list.
+    Sending the captain there keeps one accept path instead of two that drift.
+  */
   const onAcceptApplicant = useCallback(
-    (applicant: ChallengeCandidateFull) => {
+    (_applicant: ChallengeCandidateFull) => {
       if (!challengeId) return;
-      acceptOpen.mutate(
-        { challengeId, teamId: applicant.team_id },
-        {
-          onSuccess: (ch) => {
-            if (ch.match_id) router.replace(`/match/${ch.match_id}`);
-            else router.replace('/(tabs)/matches');
-          },
-          onError: (e: unknown) => {
-            const msg = e instanceof AppError ? e.message : 'Could not accept this team.';
-            Alert.alert('Match Confirmation Error', msg);
-          },
-        },
-      );
+      router.push({ pathname: '/teams/offers', params: { challengeId } });
     },
-    [acceptOpen, challengeId, router],
+    [challengeId, router],
   );
 
   const onDeclineApplicant = useCallback(
@@ -992,8 +988,29 @@ export default function SearchingScreen(): React.ReactNode {
                   </Pressable>
 
                   <Pressable
+                    onPress={() =>
+                      router.push({
+                        pathname: '/chat/[id]',
+                        params: {
+                          id: challengeId,
+                          challengeId,
+                          toTeamId: applicant.team_id,
+                          teamName: applicant.team_name,
+                        },
+                      })
+                    }
+                    style={[styles.btn, styles.btnGhost]}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Message the captain of ${applicant.team_name}`}
+                  >
+                    <AppText variant="caption" color={M.green} style={{ fontWeight: '700' }}>
+                      Message
+                    </AppText>
+                  </Pressable>
+
+                  <Pressable
                     onPress={() => onDeclineApplicant(applicant)}
-                    disabled={declineOpen.isPending || acceptOpen.isPending}
+                    disabled={declineOpen.isPending}
                     style={styles.applicantDeclineBtn}
                     accessibilityRole="button"
                   >
@@ -1004,17 +1021,14 @@ export default function SearchingScreen(): React.ReactNode {
 
                   <Pressable
                     onPress={() => onAcceptApplicant(applicant)}
-                    disabled={acceptOpen.isPending || declineOpen.isPending}
+                    disabled={declineOpen.isPending}
                     style={styles.applicantAcceptBtn}
                     accessibilityRole="button"
+                    accessibilityLabel={`Accept ${applicant.team_name} and pick your lineup`}
                   >
-                    {acceptOpen.isPending ? (
-                      <ActivityIndicator color={M.limeInk} size="small" />
-                    ) : (
-                      <AppText variant="label" color={M.limeInk} style={{ fontWeight: '800' }}>
-                        ✓ Accept & Fix Match
-                      </AppText>
-                    )}
+                    <AppText variant="label" color={M.limeInk} style={{ fontWeight: '800' }}>
+                      ✓ Accept & Fix Match
+                    </AppText>
                   </Pressable>
                 </View>
               </View>

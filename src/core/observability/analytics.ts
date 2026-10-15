@@ -5,7 +5,7 @@ import { logger } from '@core/logging/logger';
 
 /**
  * Thin analytics wrapper around PostHog. Funnel events for the Phase 1 loop
- * (signup -> profile -> create -> join -> approve -> attended) flow through here.
+ * (signup -> profile -> create -> join -> approve -> play) flow through here.
  * No-ops cleanly when no key is configured.
  */
 let client: PostHog | null = null;
@@ -35,10 +35,10 @@ export type AnalyticsEvent =
   | 'interest_approved'
   | 'team_locked'
   | 'match_cancelled'
-  | 'attendance_marked'
   | 'available_toggled'
   | 'user_reported'
-  | 'user_blocked';
+  | 'user_blocked'
+  | 'user_unblocked';
 
 export const analytics = {
   identify(userId: string): void {

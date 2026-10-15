@@ -133,19 +133,43 @@ Deno.serve(async (req: Request): Promise<Response> => {
     });
   }
 
-  // The caller must present the service role key. The cron dispatcher sends it;
-  // nothing else should be able to drain the queue.
-  const auth = req.headers.get('Authorization') ?? '';
-  if (auth !== `Bearer ${serviceKey}`) {
+  const supabase = createClient(supabaseUrl, serviceKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+
+  // The caller must present the shared dispatch secret; nothing else should be
+  // able to drain the queue.
+  //
+  // That secret lives in exactly one place: the vault row `notify_wave_service_key`,
+  // which is also what dispatch_notification_jobs reads and sends. This used to
+  // compare against SUPABASE_SERVICE_ROLE_KEY instead -- a second copy the
+  // platform injects and can rotate independently -- and when the two drifted
+  // apart the guard answered 403 to its only legitimate caller, every minute,
+  // for three weeks, with no log line and no attempts counter to show it.
+  //
+  // The database compares and returns a boolean, so the secret itself never
+  // leaves the vault, and verify_notify_wave_caller is executable by
+  // service_role only.
+  const bearer = (req.headers.get('Authorization') ?? '').replace(/^Bearer /, '');
+  const { data: callerOk, error: verifyError } = await supabase.rpc(
+    'verify_notify_wave_caller',
+    { in_token: bearer },
+  );
+
+  if (verifyError) {
+    console.error('notify-wave: caller check failed', verifyError.message);
+    return new Response(JSON.stringify({ error: 'Could not verify caller' }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  if (callerOk !== true) {
     return new Response(JSON.stringify({ error: 'Forbidden' }), {
       status: 403,
       headers: { 'Content-Type': 'application/json' },
     });
   }
-
-  const supabase = createClient(supabaseUrl, serviceKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
 
   const { data: jobs, error: claimError } = await supabase.rpc('claim_notification_jobs', {
     in_limit: BATCH_SIZE,

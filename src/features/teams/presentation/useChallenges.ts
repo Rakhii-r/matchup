@@ -98,9 +98,8 @@ export function usePostOpenChallenge(fromTeamId: string) {
         totalSlots: form.totalSlots,
         message: form.message ?? null,
         radiusM: form.radiusM,
-        // Undefined for every caller that predates the wizard, which leaves the
-        // RPC's 'friendly' default and a null end_time — the old behaviour.
-        gameType: form.gameType ?? null,
+        // Undefined for every caller that predates the wizard, which leaves a
+        // null end_time — the old behaviour.
         endTime:
           buildEndAt(form.dayOffset, form.timeHHmm, form.endTimeHHmm)?.toISOString() ?? null,
         lat: form.lat ?? null,
@@ -121,8 +120,16 @@ export function useAcceptOpenChallenge() {
   const invalidate = useInvalidateAfterChallengeChange();
 
   return useMutation({
-    mutationFn: ({ challengeId, teamId }: { challengeId: string; teamId: string }) =>
-      challengeRepository.acceptOpen(challengeId, teamId),
+    mutationFn: ({
+      challengeId,
+      teamId,
+      lineup,
+    }: {
+      challengeId: string;
+      teamId: string;
+      /** The accepting captain's squad — exactly the format size, captain included. */
+      lineup: string[];
+    }) => challengeRepository.acceptOpen(challengeId, teamId, lineup),
     onSuccess: invalidate,
   });
 }
@@ -229,18 +236,45 @@ export function useCleanupMyOpenFixtures() {
 }
 
 /**
- * Opponent teams browse open fixtures in their area looking for matches.
+ * Opponent teams browse open fixtures in their area.
+ *
+ * Pass `teamSize` (players per side) to filter by a specific format (e.g. 4 for 4v4).
+ * If omitted or null, returns open fixtures across all formats so players
+ * can discover every match available in their area or globally.
  */
-export function useNearbyOpenChallenges(coords?: { lat: number; lng: number } | null, sport?: string | null) {
+export function useNearbyOpenChallenges(
+  coords?: { lat: number; lng: number } | null,
+  sport?: string | null,
+  radiusM?: number,
+  teamSize?: number | null,
+) {
   return useQuery({
-    queryKey: ['challenges', 'nearby', coords?.lat ?? 'none', coords?.lng ?? 'none', sport ?? 'all'] as const,
+    queryKey: [
+      'challenges',
+      'nearby',
+      coords?.lat ?? 'none',
+      coords?.lng ?? 'none',
+      sport ?? 'all',
+      radiusM ?? 'default',
+      teamSize ?? 'no-format',
+    ] as const,
     queryFn: () =>
       challengeRepository.listNearbyOpenChallenges({
         lat: coords?.lat ?? null,
         lng: coords?.lng ?? null,
         sport: sport ?? null,
+        // Undefined keeps the repository's own 50 km default for the callers
+        // that never had a control (Home, the radar).
+        radiusM,
+        teamSize: teamSize ?? null,
       }),
-    refetchInterval: 10000,
+    // Unconditionally enabled so users without squads or format can browse open fixtures globally.
+    enabled: true,
+    // A safety net, not the update path: MatchJoinAlerts and PushRegistrar both
+    // invalidate ['challenges'] when something changes, and the app refetches
+    // on foreground. At 10s every open app ran this PostGIS query six times a
+    // minute whether or not anything had happened.
+    refetchInterval: 60_000,
   });
 }
 

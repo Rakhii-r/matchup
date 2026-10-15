@@ -4,12 +4,20 @@ export type LiveState = Database['public']['Functions']['get_live_state']['Retur
 export type OverBall = Database['public']['Functions']['get_this_over']['Returns'][number];
 export type BattingRow = Database['public']['Functions']['get_batting_card']['Returns'][number];
 export type BowlingRow = Database['public']['Functions']['get_bowling_card']['Returns'][number];
+/** A whole innings row. The scorecard needs both; the live state has only one. */
+export type Innings = Database['public']['Tables']['innings']['Row'];
 
-/** One ball as the scoring keypad assembles it before sending. */
+/**
+ * One ball as the scoring keypad assembles it before sending.
+ *
+ * The three player fields are nullable: the keypad records team scoring only
+ * and does not ask who was on strike or who bowled. They stay in the shape
+ * because the RPC and the columns still accept a named player.
+ */
 export interface DeliveryInput {
-  strikerId: string;
+  strikerId: string | null;
   nonStrikerId: string | null;
-  bowlerId: string;
+  bowlerId: string | null;
   runsOffBat: number;
   extraType: ExtraType | null;
   /** TOTAL extras including the penalty run. A plain wide is 1, not 0. */

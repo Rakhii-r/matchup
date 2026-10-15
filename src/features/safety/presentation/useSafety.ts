@@ -1,4 +1,4 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { useAuthStore } from '@core/auth/authStore';
 import { AppError } from '@core/errors/AppError';
@@ -28,6 +28,35 @@ export function useReportUser() {
       });
     },
     onSuccess: () => analytics.capture('user_reported'),
+  });
+}
+
+export const blockedKey = ['safety', 'blocked'] as const;
+
+export function useBlockedUsers() {
+  const blockerId = useAuthStore((s) => s.session?.user.id);
+  return useQuery({
+    queryKey: blockedKey,
+    queryFn: () => safetyRepository.listBlocked(blockerId as string),
+    enabled: Boolean(blockerId),
+  });
+}
+
+export function useUnblockUser() {
+  const qc = useQueryClient();
+  const blockerId = useAuthStore((s) => s.session?.user.id);
+
+  return useMutation({
+    mutationFn: (blockedId: string) => {
+      if (!blockerId) throw new AppError('unauthorized', 'Please sign in again.');
+      return safetyRepository.unblockUser({ blockerId, blockedId });
+    },
+    onSuccess: () => {
+      analytics.capture('user_unblocked');
+      // Same reason as blocking: visibility changes across matches, players
+      // and availability, so nothing narrower than a full refresh is correct.
+      void qc.invalidateQueries();
+    },
   });
 }
 

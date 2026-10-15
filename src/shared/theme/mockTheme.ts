@@ -11,10 +11,10 @@
  * one. A screen becomes themeable by turning its `StyleSheet.create({...})`
  * into `makeStyles(M)` and calling it inside the component.
  *
- * Converted so far: app/(tabs)/index.tsx.
- * Still frozen dark: create-profile, (tabs)/_layout, available, profile,
- * venues, match/create, profile/edit. They import `M` below, which stays
- * exported for exactly that reason.
+ * REBRANDED (Sep 2026) from sixfour24 chartreuse to the Stitch "Dynamic
+ * Athletic Turf" emerald. Because every screen reads these through `useMock()`
+ * rather than a frozen constant, changing the values here re-skins the whole
+ * app at once -- which is the entire reason the frozen `M` export was removed.
  */
 import { useMemo } from 'react';
 
@@ -34,8 +34,12 @@ export interface MockPalette {
   chip: string;
   cta: string;
   ctaText: string;
-  /** Ink for text sitting on a `lime` fill. Identical in both schemes because
-   *  `lime` is a brand fill in both, and contrast is carried by this ink. */
+  /**
+   * Ink for text sitting on a `lime` fill. It DIFFERS by scheme now: emerald is
+   * a dark fill in light mode (white ink) and a pale mint in dark mode
+   * (near-black ink). Under the old chartreuse both schemes shared one ink,
+   * which is what the previous note here described.
+   */
   limeInk: string;
   /** Tinted tile behind a settings/admin glyph. */
   iconChip: string;
@@ -43,54 +47,54 @@ export interface MockPalette {
   overlay: string;
 }
 
+/*
+  Emerald dark, derived from the Stitch light tokens (Stitch shipped light only).
+  Follows the same Material tonal logic those tokens use: the pale mint becomes
+  the fill and the ink on it becomes near-black.
+*/
 export const MDark: MockPalette = {
-  bg: '#0F0F10',
-  card: '#1A1A1D',
-  cardHi: '#202124',
-  border: '#2A2B2F',
-  text: '#FFFFFF',
-  muted: '#A1A1AA',
-  faint: '#6B7075',
-  green: '#98BB01',
-  greenDeep: '#2E7D32',
-  lime: '#8BC34A',
-  chip: '#26272B',
-  cta: '#EDEDED',
-  ctaText: '#141414',
-  limeInk: '#06230F',
-  iconChip: '#173A22',
-  danger: '#FF7A7A',
-  overlay: 'rgba(0,0,0,0.45)',
+  bg: '#0B1310',
+  card: '#131F1A',
+  cardHi: '#1C2D26',
+  border: '#243B32',
+  text: '#F1F5F9',
+  muted: '#94A3B8',
+  faint: '#64748B',
+  green: '#10B981',
+  greenDeep: '#059669',
+  lime: '#10B981',
+  chip: '#1E332B',
+  cta: '#10B981',
+  ctaText: '#06281E',
+  limeInk: '#06281E',
+  iconChip: '#1A382C',
+  danger: '#f87171',
+  overlay: 'rgba(0,0,0,0.6)',
 };
 
 /**
- * Light counterpart. `green` is darkened to #5A7400 for anything that carries
- * text: the brand chartreuse #98BB01 fails WCAG AA against white. The brand
- * colour still appears at full strength as a fill (`lime`), where contrast is
- * carried by near-black text on top rather than by the colour itself.
+ * Light counterpart with crisp emerald sports aesthetic.
  */
 export const MLight: MockPalette = {
-  bg: '#FFFFFF',
-  card: '#F4F6F2',
-  cardHi: '#EAEEE4',
-  border: '#D9E0CE',
-  text: '#141600',
-  muted: '#5B6675',
-  // #8A93A0 scored 2.86:1 on `card` — below even the 3.0 large-text floor, and
-  // `faint` carries captions. Darkened to clear 4.5:1 while staying visibly
-  // lighter than `muted` (4.82 vs 5.36), so the hierarchy is preserved.
-  faint: '#646D7A',
-  green: '#5A7400',
-  greenDeep: '#2E7D32',
-  lime: '#98BB01',
-  chip: '#EDF1E6',
-  cta: '#141600',
-  ctaText: '#FFFFFF',
-  limeInk: '#06230F',
-  iconChip: '#E4EFE0',
-  danger: '#C62828',
-  overlay: 'rgba(0,0,0,0.25)',
+  bg: '#F8FAF9',
+  card: '#ffffff',
+  cardHi: '#F1F5F3',
+  border: '#E2EAE5',
+  text: '#0F172A',
+  muted: '#64748B',
+  faint: '#94A3B8',
+  green: '#006341',
+  greenDeep: '#00482f',
+  lime: '#006341',
+  chip: '#E8F5EF',
+  cta: '#006341',
+  ctaText: '#ffffff',
+  limeInk: '#ffffff',
+  iconChip: '#E8F5EF',
+  danger: '#dc2626',
+  overlay: 'rgba(0,0,0,0.3)',
 };
+
 
 /**
  * The active palette. Memoised on scheme so `makeStyles(M)` only rebuilds a
@@ -113,10 +117,11 @@ export const S = {
   xl: 32,
 } as const;
 
-/** Corner radii used across these cards and pills. */
+/** Corner radii, matching Stitch's `rounded` scale. */
 export const R = {
   sm: 8,
-  md: 14,
-  lg: 20,
+  md: 12,
+  lg: 16,
+  xl: 24,
   pill: 999,
 } as const;

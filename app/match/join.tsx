@@ -30,15 +30,15 @@ export default function JoinMatchScreen(): React.ReactNode {
       const match = await joinByCode.mutateAsync(parsed.data.code);
       router.replace({ pathname: '/match/[id]', params: { id: match.id } });
     } catch (e) {
-      setError(e instanceof AppError ? e.message : 'Could not join the match.');
+      setError(e instanceof AppError ? e.message : 'Could not join the game.');
     }
   };
 
   return (
     <Screen>
-      <Stack.Screen options={{ title: 'Join match' }} />
+      <Stack.Screen options={{ title: 'Join game' }} />
       <View style={{ gap: spacing.sm, marginBottom: spacing.lg }}>
-        <AppText variant="heading">Join a match</AppText>
+        <AppText variant="heading">Join a game</AppText>
         <AppText muted>Enter the 6-character code the organiser shared with you.</AppText>
       </View>
 
@@ -57,7 +57,7 @@ export default function JoinMatchScreen(): React.ReactNode {
         </AppText>
       ) : null}
 
-      <Button label="Join match" onPress={onSubmit} loading={joinByCode.isPending} />
+      <Button label="Join game" onPress={onSubmit} loading={joinByCode.isPending} />
     </Screen>
   );
 }

@@ -27,7 +27,7 @@
       "channel": "production",
       "autoIncrement": true,
       "android": {
-        "buildType": "apk"
+        "buildType": "app-bundle"
       },
       "env": {
         "EXPO_PUBLIC_APP_ENV": "production",

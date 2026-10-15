@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { supabase } from '@core/api/supabaseClient';
@@ -17,7 +17,6 @@ const matchKey = (id: string) => ['match', id] as const;
 const playersKey = (id: string) => ['match', id, 'players'] as const;
 const membershipKey = (id: string, userId: string | undefined) =>
   ['match', id, 'membership', userId ?? 'anon'] as const;
-const attendanceKey = (id: string) => ['match', id, 'attendance'] as const;
 
 // ---------------------------------------------------------------------------
 // Queries
@@ -35,6 +34,23 @@ export function useMatchPlayers(matchId: string) {
   return useQuery({
     queryKey: playersKey(matchId),
     queryFn: () => matchRepository.listPlayers(matchId),
+    enabled: matchId.length > 0,
+  });
+}
+
+/**
+ * Every game played in this match's booked slot, oldest first.
+ *
+ * Kept off the `['match', id]` prefix on purpose. `useInvalidateScoring`
+ * invalidates that whole prefix after every ball so the match row refetches
+ * (see the auto_complete_second_innings note in the scoring model), and the
+ * series only changes when a game starts or finishes — refetching it per
+ * delivery would be a request every few seconds for a list that has not moved.
+ */
+export function useMatchSeries(matchId: string) {
+  return useQuery({
+    queryKey: ['match-series', matchId] as const,
+    queryFn: () => matchRepository.listSeries(matchId),
     enabled: matchId.length > 0,
   });
 }
@@ -60,19 +76,46 @@ export function useMatchSides(matchId: string) {
  * change event on this match is the signal to refetch both. Realtime applies
  * the table's RLS, so a subscriber is only ever told about rows it may read.
  *
- * The channel name is per match AND per user: two screens in the same app
- * session must not collide on one topic, and the channel has to be torn down on
- * unmount or the subscription leaks for the life of the app.
+ * The channel name is per match, per user AND per mount: two screens in the same
+ * app session must not collide on one topic, and the channel has to be torn
+ * down on unmount or the subscription leaks for the life of the app.
  */
 export function useMatchPlayersRealtime(matchId: string): void {
   const qc = useQueryClient();
   const userId = useAuthStore((s) => s.session?.user.id);
 
+  /*
+    The topic is per HOOK INSTANCE, not per match+user.
+
+    Two copies of the match screen can be mounted at the same time: a native
+    stack keeps the screen underneath a pushed route alive, so coming back from
+    the toss with `replace` puts a second `/match/[id]` on top of the first.
+    supabase-js hands back the SAME channel object for a topic it already holds,
+    so the second mount would call `.on()` on a channel that is already
+    subscribed — which throws
+
+      cannot add `postgres_changes` callbacks for realtime:match-roster:… after `subscribe()`
+
+    and takes the screen down with a render error. A per-instance suffix keeps
+    the two subscriptions apart; it is stored in a ref so a re-run of the effect
+    reuses it and teardown always removes its own channel.
+  */
+  const [instanceId] = useState(() => Math.random().toString(36).slice(2, 10));
+
   useEffect(() => {
     if (matchId.length === 0 || !userId) return;
 
+    const topic = `match-roster:${matchId}:${userId}:${instanceId}`;
+
+    // `removeChannel` is async, so a channel from a previous run of this effect
+    // (matchId changed, or a fast refresh) can still be registered under the
+    // same topic. Drop it first rather than inheriting its subscribed state.
+    for (const stale of supabase.getChannels()) {
+      if (stale.topic === `realtime:${topic}`) void supabase.removeChannel(stale);
+    }
+
     const channel = supabase
-      .channel(`match-roster:${matchId}:${userId}`)
+      .channel(topic)
       .on(
         'postgres_changes',
         {
@@ -92,7 +135,7 @@ export function useMatchPlayersRealtime(matchId: string): void {
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [matchId, userId, qc]);
+  }, [instanceId, matchId, userId, qc]);
 }
 
 export function useMyMembership(matchId: string) {
@@ -101,14 +144,6 @@ export function useMyMembership(matchId: string) {
     queryKey: membershipKey(matchId, userId),
     queryFn: () => matchRepository.getMyMembership(matchId, userId as string),
     enabled: matchId.length > 0 && Boolean(userId),
-  });
-}
-
-export function useAttendance(matchId: string) {
-  return useQuery({
-    queryKey: attendanceKey(matchId),
-    queryFn: () => matchRepository.listAttendance(matchId),
-    enabled: matchId.length > 0,
   });
 }
 
@@ -141,17 +176,43 @@ export function useAllMyBookedMatches() {
   });
 }
 
-export function useNearbyMatches(coords: Coords | null, sport: Sport | null) {
+/**
+ * How far "near you" reaches. The 5 km used to be written into the query below
+ * AND into two empty-state strings, so a change in one never reached the other.
+ * One definition, and the screens read the label off it.
+ */
+export const SEARCH_RADII_M = [2000, 5000, 10000, 25000, 50000, 0] as const;
+export const DEFAULT_SEARCH_RADIUS_M = 5000;
+
+export function formatRadius(radiusM: number | null | undefined): string {
+  if (radiusM == null || radiusM <= 0) return 'All';
+  return `${Math.round(radiusM / 1000)} km`;
+}
+
+export function useNearbyMatches(
+  coords: Coords | null,
+  sport: Sport | null,
+  radiusM: number | null = DEFAULT_SEARCH_RADIUS_M,
+) {
   return useQuery({
-    queryKey: ['matches', 'nearby', coords?.lat ?? 0, coords?.lng ?? 0, sport ?? 'all'] as const,
+    // radiusM is part of the key: without it, widening the search returned the
+    // previous distance's cached rows and the list appeared not to change.
+    queryKey: [
+      'matches',
+      'nearby',
+      coords?.lat ?? null,
+      coords?.lng ?? null,
+      sport ?? 'all',
+      radiusM ?? null,
+    ] as const,
     queryFn: () =>
       matchRepository.nearby({
-        lat: (coords as Coords).lat,
-        lng: (coords as Coords).lng,
-        radiusM: 5000,
+        lat: coords?.lat ?? null,
+        lng: coords?.lng ?? null,
+        radiusM: radiusM ?? null,
         sport,
       }),
-    enabled: coords != null,
+    enabled: true,
   });
 }
 
@@ -189,9 +250,8 @@ export function useCreateMatch() {
         lat: venue.lat,
         lng: venue.lng,
         notes: form.notes ?? null,
-        // Both are undefined for every caller that predates the wizard, which
-        // leaves the game_type default and a null end_time — the old behaviour.
-        gameType: form.gameType ?? null,
+        // Undefined for every caller that predates the wizard, which leaves a
+        // null end_time — the old behaviour.
         endTime: buildEndAt(form.dayOffset, form.timeHHmm, form.endTimeHHmm)?.toISOString() ?? null,
       });
     },
@@ -267,6 +327,39 @@ export function useRematch() {
       void qc.invalidateQueries({ queryKey: matchKey(newMatch.id) });
       void qc.invalidateQueries({ queryKey: ['matches', 'mine', userId ?? 'anon'] });
       void qc.invalidateQueries({ queryKey: ['matches', 'joined', userId ?? 'anon'] });
+      // The series gained a game. Every game in the slot answers with the same
+      // list, and the screen the user just left is still mounted behind the
+      // navigation, so the whole prefix is dropped rather than one match's key.
+      void qc.invalidateQueries({ queryKey: ['match-series'] });
+    },
+  });
+}
+
+/**
+ * Attach a venue to a match after creation, or clear it with `venueId: null`.
+ *
+ * The wizard captures an area and defers the venue, so this is the write that
+ * completes the location. Organiser-only server-side; the UI gates on
+ * `match.creator_id === userId` and shows non-organisers a stated line rather
+ * than a button that would fail.
+ *
+ * Invalidates the lists as well as the match: `venue_text` is rendered on the
+ * home feed, the matches tab and the team fixtures list, so a tag that only
+ * refreshed the detail screen would leave three stale surfaces behind it.
+ */
+export function useSetMatchVenue(matchId: string) {
+  const qc = useQueryClient();
+  const userId = useAuthStore((s) => s.session?.user.id);
+
+  return useMutation({
+    mutationFn: (venueId: string | null): Promise<Match> =>
+      matchRepository.setVenue(matchId, venueId),
+    onSuccess: (match) => {
+      void qc.invalidateQueries({ queryKey: matchKey(match.id) });
+      void qc.invalidateQueries({ queryKey: ['matches', 'mine', userId ?? 'anon'] });
+      void qc.invalidateQueries({ queryKey: ['matches', 'joined', userId ?? 'anon'] });
+      void qc.invalidateQueries({ queryKey: ['matches', 'nearby'] });
+      void qc.invalidateQueries({ queryKey: ['match-series'] });
     },
   });
 }
@@ -313,7 +406,7 @@ export function useJoinByCode() {
       if (!userId) throw new AppError('unauthorized', 'Please sign in again.');
 
       const match = await matchRepository.getByShareCode(code);
-      if (!match) throw new AppError('not_found', 'No match found for that code.');
+      if (!match) throw new AppError('not_found', 'No game found for that code.');
 
       // Every eligibility rule (own match, not open, already started, full,
       // blocked) is enforced inside join_match under a row lock. Re-checking
@@ -398,7 +491,7 @@ export function useMatchStatus(matchId: string) {
 
   const invalidate = () => {
     void qc.invalidateQueries({ queryKey: matchKey(matchId) });
-    // "My matches" filters out cancelled rows, so it has to be refetched too.
+    // "My games" filters out cancelled rows, so it has to be refetched too.
     void qc.invalidateQueries({ queryKey: ['matches', 'mine', userId ?? 'anon'] });
   };
 
@@ -418,7 +511,7 @@ export function useMatchStatus(matchId: string) {
   /**
    * Call the match off. Terminal and irreversible — there is no un-cancel, so
    * the UI must confirm before calling this. Cancelled matches drop out of both
-   * the nearby feed (the RPC only returns 'open') and "My matches".
+   * the nearby feed (the RPC only returns 'open') and "My games".
    */
   const cancel = useMutation({
     mutationFn: () => matchRepository.setStatus(matchId, 'cancelled'),
@@ -431,6 +524,21 @@ export function useMatchStatus(matchId: string) {
   return { lock, complete, cancel };
 }
 
+/**
+ * Delete a posted game. Invalidates the lists rather than the single match:
+ * the row is gone, so ['match', id] has nothing left to refetch.
+ */
+export function useDeleteMatch() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (matchId: string) => matchRepository.deleteMatch(matchId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['matches'] });
+      void qc.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+  });
+}
+
 export function useCancelMatch() {
   const qc = useQueryClient();
   return useMutation({
@@ -440,22 +548,4 @@ export function useCancelMatch() {
       void qc.invalidateQueries({ queryKey: ['matches'] });
     },
   });
-}
-
-export function useAttendanceActions(matchId: string) {
-  const qc = useQueryClient();
-  const markedBy = useAuthStore((s) => s.session?.user.id);
-
-  const mark = useMutation({
-    mutationFn: ({ userId, attended }: { userId: string; attended: boolean }) => {
-      if (!markedBy) throw new AppError('unauthorized', 'Please sign in again.');
-      return matchRepository.markAttendance({ matchId, userId, attended, markedBy });
-    },
-    onSuccess: () => {
-      analytics.capture('attendance_marked');
-      void qc.invalidateQueries({ queryKey: matchKey(matchId) });
-    },
-  });
-
-  return { mark };
 }

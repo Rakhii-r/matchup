@@ -87,6 +87,7 @@ export function PushRegistrar(): null {
           void queryClient.invalidateQueries({ queryKey: ['match', matchId] });
         }
         void queryClient.invalidateQueries({ queryKey: ['matches'] });
+        void queryClient.invalidateQueries({ queryKey: ['challenges'] });
       });
     })();
 

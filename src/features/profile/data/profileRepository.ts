@@ -59,6 +59,22 @@ export const profileRepository = {
     return `${data.publicUrl}?v=${Date.now()}`;
   },
 
+  /**
+   * Writes ONLY the photo column. The photo is saved the moment it is picked,
+   * separately from the rest of the edit form, so this must not need a name,
+   * an area or a sport list to go with it.
+   */
+  async setAvatarUrl(userId: string, avatarUrl: string | null): Promise<Profile> {
+    const { data, error } = await supabase
+      .from('profiles')
+      .update({ avatar_url: avatarUrl })
+      .eq('id', userId)
+      .select('*')
+      .single();
+    if (error) throw toAppError(error);
+    return data;
+  },
+
   async getMine(userId: string): Promise<Profile | null> {
     const { data, error } = await supabase
       .from('profiles')
@@ -93,6 +109,31 @@ export const profileRepository = {
    * stored URL alone. Writing `input.avatarUrl ?? null` here would silently
    * erase the user's photo on every unrelated name or area change.
    */
+  /**
+   * Mute switches, keyed by notification GROUP rather than by kind — a new kind
+   * falls into an existing group server-side and honours a choice the user
+   * already made. Absent key means enabled, so only an explicit false mutes.
+   * Merged rather than replaced so one toggle cannot clear the others.
+   */
+  async updateNotifPrefs(userId: string, prefs: Record<string, boolean>): Promise<Profile> {
+    const { data: current, error: readError } = await supabase
+      .from('profiles')
+      .select('notif_prefs')
+      .eq('id', userId)
+      .single();
+    if (readError) throw toAppError(readError);
+
+    const merged = { ...((current?.notif_prefs as Record<string, boolean>) ?? {}), ...prefs };
+    const { data, error } = await supabase
+      .from('profiles')
+      .update({ notif_prefs: merged })
+      .eq('id', userId)
+      .select('*')
+      .single();
+    if (error) throw toAppError(error);
+    return data;
+  },
+
   async update(input: UpdateProfileInput): Promise<Profile> {
     const { data, error } = await supabase
       .from('profiles')

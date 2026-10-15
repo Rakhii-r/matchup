@@ -18,7 +18,9 @@ import { Stack, useRouter } from 'expo-router';
 
 import { R, S, useMock, type MockPalette } from '@shared/theme/mockTheme';
 import { AppText } from '@shared/ui/AppText';
-import { IconBack } from '@shared/ui/icons';
+import { RoundBack } from '@shared/ui/decor';
+import { IconArrowRight } from '@shared/ui/icons';
+import { PressableScale } from '@shared/ui/PressableScale';
 
 /** Smallest comfortable tap target. Applied to every control in the wizard. */
 export const TOUCH = 44;
@@ -62,19 +64,13 @@ export function WizardScreen({
       <Stack.Screen options={{ headerShown: false }} />
 
       <View style={styles.header}>
-        <Pressable
+        <RoundBack
           // A deep link opens a step with nothing behind it, where back() is a
           // no-op and would leave the user stranded. Fall back to the tabs.
           onPress={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)'))}
-          hitSlop={10}
-          style={styles.backBtn}
-          accessibilityRole="button"
-          accessibilityLabel="Go back"
-        >
-          <IconBack color={M.text} />
-        </Pressable>
+        />
         <View style={styles.headerText}>
-          <AppText variant="heading" color={M.text}>
+          <AppText variant="heading" color={M.text} style={styles.headerTitle}>
             {title}
           </AppText>
           <AppText variant="caption" color={M.muted}>
@@ -120,21 +116,19 @@ export function WizardScreen({
             {error}
           </AppText>
         ) : null}
-        <Pressable
+        <PressableScale
           disabled={blocked}
           onPress={onPrimary}
           accessibilityRole="button"
           accessibilityState={{ disabled: blocked }}
-          style={({ pressed }) => [
-            styles.cta,
-            { transform: [{ scale: pressed ? 0.98 : 1 }], opacity: blocked ? 0.45 : 1 },
-          ]}
+          style={[styles.cta, { opacity: blocked ? 0.45 : 1 }]}
         >
           {primaryPending ? <ActivityIndicator color={M.limeInk} style={styles.ctaSpinner} /> : null}
           <AppText variant="label" color={M.limeInk} style={styles.ctaLabel}>
             {primaryLabel}
           </AppText>
-        </Pressable>
+          {primaryPending ? null : <IconArrowRight color={M.limeInk} size={20} />}
+        </PressableScale>
       </View>
     </SafeAreaView>
   );
@@ -156,15 +150,23 @@ export function Chip({
   label,
   on,
   onPress,
+  grid = false,
 }: {
   label: string;
   on: boolean;
   onPress: () => void;
+  /** Share the row in equal thirds instead of sizing to the label. */
+  grid?: boolean;
 }): React.ReactNode {
   const M = useMock();
   const styles = useMemo(() => makeStyles(M), [M]);
   return (
-    <Pressable onPress={onPress} accessibilityRole="button" accessibilityState={{ selected: on }}>
+    <Pressable
+      onPress={onPress}
+      style={grid ? styles.chipGridCell : null}
+      accessibilityRole="button"
+      accessibilityState={{ selected: on }}
+    >
       <MotiView
         animate={{ backgroundColor: on ? M.green : M.card, borderColor: on ? M.green : M.border }}
         transition={{ type: 'timing', duration: 160 }}
@@ -230,16 +232,12 @@ const makeStyles = (M: MockPalette) =>
       paddingTop: S.sm,
       paddingBottom: S.sm,
     },
-    backBtn: {
-      width: TOUCH,
-      height: TOUCH,
-      alignItems: 'center',
-      justifyContent: 'center',
-      marginLeft: -S.sm,
-    },
+    // Spacer the size of the round back button, so the title stays centred.
+    backBtn: { width: TOUCH, height: TOUCH },
     headerText: { flex: 1, alignItems: 'center' },
-    progress: { flexDirection: 'row', gap: S.xs, paddingHorizontal: S.lg, paddingBottom: S.md },
-    progressSegment: { flex: 1, height: 4, borderRadius: R.pill, backgroundColor: M.border },
+    headerTitle: { fontFamily: 'SpaceGrotesk_700Bold', fontWeight: '700' },
+    progress: { flexDirection: 'row', gap: 6, paddingHorizontal: S.lg, paddingBottom: S.md },
+    progressSegment: { flex: 1, height: 5, borderRadius: R.pill, backgroundColor: M.border },
     scroll: { paddingHorizontal: S.lg, paddingBottom: S.xl },
     subtitle: { marginBottom: S.md },
     sectionLabel: { letterSpacing: 1.2, marginTop: S.lg, marginBottom: S.sm, fontWeight: '700' },
@@ -252,6 +250,8 @@ const makeStyles = (M: MockPalette) =>
       minWidth: 72,
       alignItems: 'center',
     },
+    // Three to a row: a third of the width less the two gaps between them.
+    chipGridCell: { flexBasis: '30%', flexGrow: 1 },
     stateBox: {
       backgroundColor: M.card,
       borderRadius: R.lg,
@@ -286,9 +286,9 @@ const makeStyles = (M: MockPalette) =>
       alignItems: 'center',
       justifyContent: 'center',
       gap: S.sm,
-      minHeight: 54,
+      minHeight: 58,
       backgroundColor: M.green,
-      borderRadius: 18,
+      borderRadius: R.pill,
       shadowColor: M.green,
       shadowOffset: { width: 0, height: 4 },
       shadowOpacity: 0.4,
@@ -296,5 +296,5 @@ const makeStyles = (M: MockPalette) =>
       elevation: 8,
     },
     ctaSpinner: { marginRight: S.xs },
-    ctaLabel: { fontSize: 16 },
+    ctaLabel: { fontSize: 17, fontFamily: 'SpaceGrotesk_700Bold', fontWeight: '700' },
   });

@@ -7,15 +7,12 @@ export type MatchPlayer = Database['public']['Tables']['match_players']['Row'];
 
 export const SportEnum = z.enum(['box_cricket', 'badminton']);
 
-/** Mirrors the `game_type` CHECK on `matches` and `team_challenges`. */
-export const GameTypeEnum = z.enum(['friendly', 'competitive']);
-
 const HHMM = /^([01]\d|2[0-3]):([0-5]\d)$/;
 
 /** Create-match form. Day/time are chip selections that compose into scheduled_at. */
 export const CreateMatchSchema = z
   .object({
-    matchName: z.string().trim().min(2, 'Enter a match name').max(80),
+    matchName: z.string().trim().min(2, 'Enter a game name').max(80),
     sport: SportEnum,
     venueId: z.string().uuid('Select a venue'),
     dayOffset: z.number().int().min(0, 'Pick a day').max(13),
@@ -24,11 +21,10 @@ export const CreateMatchSchema = z
     missingCount: z.number().int().min(1, 'Need at least 1 player').max(39),
     notes: z.string().trim().max(280).optional(),
     /**
-     * Added with the create-match wizard. Both are optional so every existing
-     * caller keeps compiling and keeps its old behaviour: `gameType` falls back
-     * to the column default and `endTimeHHmm` to null.
+     * Added with the create-match wizard. Optional so every existing caller
+     * keeps compiling and keeps its old behaviour: `endTimeHHmm` falls back
+     * to null.
      */
-    gameType: GameTypeEnum.optional(),
     endTimeHHmm: z.string().regex(HHMM, 'Pick an end time').optional(),
   })
   .refine((v) => v.missingCount < v.totalSlots, {
@@ -52,15 +48,19 @@ export type CreateMatchForm = z.infer<typeof CreateMatchSchema>;
  * two squads.
  */
 export const CreateOpenMatchSchema = z.object({
-  matchName: z.string().trim().min(2, 'Enter a match name').max(80),
+  matchName: z.string().trim().min(2, 'Enter a game name').max(80),
   sport: SportEnum,
   areaName: z.string().trim().min(2, 'Enter an area name').max(100),
   dayOffset: z.number().int().min(0, 'Pick a day').max(13),
-  timeHHmm: z.string().regex(HHMM, 'Pick a start time'),
-  /** Absent means the organiser left the finish open. */
-  endTimeHHmm: z.string().regex(HHMM, 'Pick an end time').optional(),
+  timeHHmm: z.string().regex(HHMM, 'Pick when you are free'),
+  /**
+   * Required. The end of the booked slot is what bounds the whole session —
+   * every game started with `create_rematch` inherits it, and the RPC refuses
+   * once it has passed — so a match may not be created without one. The wizard
+   * derives it from a duration chip, so this never means extra typing.
+   */
+  endTimeHHmm: z.string().regex(HHMM, 'Pick when you are free'),
   totalSlots: z.number().int().min(2, 'At least 2 players').max(40),
-  gameType: GameTypeEnum,
   /** Metres, to match the column and the RPC. The chips are kilometres. */
   radiusM: z.number().int().min(1000, 'Pick a search distance').max(50000),
   lat: z.number().optional(),

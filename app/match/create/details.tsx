@@ -8,7 +8,7 @@
  * route, which is why `app/match/create/team.tsx` no longer exists.
  *
  * TWO CREATION ENGINES, and the match type picks one. This screen used to run
- * every submit through `post_open_challenge`, which is why "Post a Match"
+ * every submit through `post_open_challenge`, which is why "Post a Game"
  * demanded a team and then dropped the organiser on the opponent radar — it was
  * a Team Vs Team challenge with a different label on it.
  *
@@ -42,6 +42,10 @@ import { useCreateOpenMatch } from '@features/matches/presentation/useMatches';
 import {
   useCreateMatchWizard,
   stepPosition,
+  PLAY_WINDOWS,
+  windowForTime,
+  addMinutesHHmm,
+  DEFAULT_SLOT_DURATION_MIN,
 } from '@features/matches/presentation/useCreateMatchWizard';
 import {
   Chip,
@@ -54,14 +58,17 @@ import { useSportLabel } from '@features/sports/presentation/useSports';
 import { PostOpenChallengeSchema } from '@features/teams/domain/challengeSchema';
 import { usePostOpenChallenge } from '@features/teams/presentation/useChallenges';
 import { useMyTeamsOverview } from '@features/teams/presentation/useTeams';
+import { useSetTeamFormat } from '@features/teams/presentation/useRecruit';
 import type { Sport } from '@shared/types/database.types';
 import { R, S, useMock, type MockPalette } from '@shared/theme/mockTheme';
+import { useResponsive, useSheetInsets } from '@shared/theme/responsive';
 import { AppText } from '@shared/ui/AppText';
 import {
   IconCalendar,
-  IconClock,
   IconClose,
   IconChevron,
+  IconEdit,
+  IconPin,
   IconPlus,
   IconSearch,
   IconUsers,
@@ -81,14 +88,45 @@ const PLAYERS_PER_SIDE: Record<Sport, number[]> = {
   badminton: [1, 2],
 };
 
-const GAME_TYPES = [
-  { value: 'friendly', label: 'Friendly' },
-  { value: 'competitive', label: 'Competitive' },
-] as const;
-
 const WEEKDAY = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTH = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const MINUTES = [0, 15, 30, 45];
+
+const HOURLY_SLOTS = [
+  '00:00', '01:00', '02:00', '03:00', '04:00', '05:00',
+  '06:00', '07:00', '08:00', '09:00', '10:00', '11:00',
+  '12:00', '13:00', '14:00', '15:00', '16:00', '17:00',
+  '18:00', '19:00', '20:00', '21:00', '22:00', '23:00',
+];
+
+const TIME_CATEGORIES = [
+  { key: 'all', label: 'All (24h)' },
+  { key: 'morning', label: 'Morning (6-12)' },
+  { key: 'afternoon', label: 'Afternoon (12-5)' },
+  { key: 'evening', label: 'Evening (5-9)' },
+  { key: 'night', label: 'Night (9-6)' },
+] as const;
+
+function format12h(hhmm: string): string {
+  const [hStr = '0', mStr = '00'] = hhmm.split(':');
+  const h = Number(hStr);
+  const ap = h < 12 ? 'AM' : 'PM';
+  const h12 = h % 12 || 12;
+  return `${h12}:${mStr} ${ap}`;
+}
+
+function getUpcomingDays(count = 7): { offset: number; dayLabel: string; dayNumber: string; monthLabel: string }[] {
+  const days: { offset: number; dayLabel: string; dayNumber: string; monthLabel: string }[] = [];
+  const now = new Date();
+  for (let i = 0; i < count; i += 1) {
+    const d = new Date(now);
+    d.setDate(now.getDate() + i);
+    const dayLabel = i === 0 ? 'Today' : i === 1 ? 'Tomorrow' : WEEKDAY[d.getDay()] ?? '';
+    const dayNumber = String(d.getDate()).padStart(2, '0');
+    const monthLabel = MONTH[d.getMonth()] ?? '';
+    days.push({ offset: i, dayLabel, dayNumber, monthLabel });
+  }
+  return days;
+}
 
 function labelForDay(offset: number): string {
   if (offset === 0) return 'Today';
@@ -98,16 +136,6 @@ function labelForDay(offset: number): string {
   return `${WEEKDAY[d.getDay()]}, ${d.getDate()} ${MONTH[d.getMonth()]}`;
 }
 
-function to12h(hh: number, mm: number): string {
-  const period = hh < 12 ? 'AM' : 'PM';
-  const h12 = hh % 12 === 0 ? 12 : hh % 12;
-  return `${h12}:${String(mm).padStart(2, '0')} ${period}`;
-}
-
-function fmtHHmm(h: number, m: number): string {
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-}
-
 /** '19:30' → { h: 19, m: 30 }. Null for the empty string the store starts with. */
 function parseHHmm(value: string): { h: number; m: number } | null {
   const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(value);
@@ -115,122 +143,14 @@ function parseHHmm(value: string): { h: number; m: number } | null {
   return { h: Number(match[1]), m: Number(match[2]) };
 }
 
-/** "1h 30m" between two instants, for the end-time caption. */
-function durationLabel(startMs: number, endMs: number): string {
-  const mins = Math.round((endMs - startMs) / 60000);
-  const h = Math.floor(mins / 60);
-  const m = mins % 60;
-  if (h === 0) return `${m}m`;
-  return m === 0 ? `${h}h` : `${h}h ${m}m`;
-}
-
-/**
- * Hour/minute sheet. `minTotal` is minutes-since-midnight below which cells are
- * dead — used to keep a match scheduled for today out of the past, which is the
- * rule the old form enforced.
- */
-function TimeSheet({
-  visible,
-  title,
-  value,
-  minTotal,
-  onPick,
-  onClose,
-}: {
-  visible: boolean;
-  title: string;
-  value: { h: number; m: number } | null;
-  minTotal: number | null;
-  onPick: (next: { h: number; m: number }) => void;
-  onClose: () => void;
-}): React.ReactNode {
-  const M = useMock();
-  const styles = useMemo(() => makeStyles(M), [M]);
-  const floor = minTotal ?? -1;
-  // The hour the minute column assumes before an hour has been picked. Without
-  // it every minute would test against hour 0 and read as disabled whenever the
-  // floor is a real time of day.
-  const fallbackHour = Math.min(23, Math.max(0, Math.ceil((floor + 1) / 60)));
-  const hour = value?.h ?? fallbackHour;
-
-  return (
-    <Modal transparent visible={visible} animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.sheetBackdrop} onPress={onClose} accessibilityRole="button" />
-      <View style={styles.sheet}>
-        <View style={styles.sheetHead}>
-          <AppText variant="heading" color={M.text}>
-            {title}
-          </AppText>
-          <Pressable
-            hitSlop={10}
-            onPress={onClose}
-            style={styles.sheetClose}
-            accessibilityRole="button"
-            accessibilityLabel="Close"
-          >
-            <IconClose color={M.muted} size={20} />
-          </Pressable>
-        </View>
-        <View style={styles.timeCols}>
-          <ScrollView style={styles.timeCol} showsVerticalScrollIndicator={false}>
-            {Array.from({ length: 24 }, (_, h) => h).map((h) => {
-              // Dead only when no minute in the hour is still selectable.
-              const disabled = h * 60 + 45 <= floor;
-              const on = value?.h === h;
-              return (
-                <Pressable
-                  key={h}
-                  disabled={disabled}
-                  style={[styles.timeCell, on ? styles.timeCellOn : null]}
-                  onPress={() => onPick({ h, m: value?.m ?? 0 })}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: on, disabled }}
-                >
-                  <AppText color={disabled ? M.faint : on ? M.green : M.text}>
-                    {String(h).padStart(2, '0')}
-                  </AppText>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
-          <ScrollView style={styles.timeCol} showsVerticalScrollIndicator={false}>
-            {MINUTES.map((m) => {
-              const disabled = hour * 60 + m <= floor;
-              const on = value?.m === m;
-              return (
-                <Pressable
-                  key={m}
-                  disabled={disabled}
-                  style={[styles.timeCell, on ? styles.timeCellOn : null]}
-                  onPress={() => onPick({ h: hour, m })}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: on, disabled }}
-                >
-                  <AppText color={disabled ? M.faint : on ? M.green : M.text}>
-                    {String(m).padStart(2, '0')}
-                  </AppText>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
-        </View>
-        <Pressable
-          style={[styles.sheetCta, { opacity: value ? 1 : 0.45 }]}
-          disabled={!value}
-          onPress={onClose}
-          accessibilityRole="button"
-        >
-          <AppText variant="label" color={M.limeInk} style={styles.sheetCtaLabel}>
-            Done
-          </AppText>
-        </Pressable>
-      </View>
-    </Modal>
-  );
-}
-
 export default function MatchDetailsStep(): React.ReactNode {
   const M = useMock();
+  // Clears the home indicator / gesture bar, and stops a long sheet
+  // running off the top of a small screen.
+  const sheetInsets = useSheetInsets();
+  // A flat 320 is over half a small phone's screen and a quarter of a tablet's.
+  const { clampHeight } = useResponsive();
+  const pickerListHeight = clampHeight(0.4, 200, 420);
   const styles = useMemo(() => makeStyles(M), [M]);
   const router = useRouter();
 
@@ -244,20 +164,25 @@ export default function MatchDetailsStep(): React.ReactNode {
   const dayOffset = useCreateMatchWizard((s) => s.dayOffset);
   const timeHHmm = useCreateMatchWizard((s) => s.timeHHmm);
   const endTimeHHmm = useCreateMatchWizard((s) => s.endTimeHHmm);
-  const gameType = useCreateMatchWizard((s) => s.gameType);
+  // Falls back to the store's own default, not a second, different one. Only a
+  // draft persisted before the setEndTimeHHmm fix can still be null here.
+  const slotDurationMin = useCreateMatchWizard(
+    (s) => s.slotDurationMin ?? DEFAULT_SLOT_DURATION_MIN,
+  );
 
   const setTeamId = useCreateMatchWizard((s) => s.setTeamId);
   const setPlayersPerSide = useCreateMatchWizard((s) => s.setPlayersPerSide);
   const setDayOffset = useCreateMatchWizard((s) => s.setDayOffset);
   const setTimeHHmm = useCreateMatchWizard((s) => s.setTimeHHmm);
-  const setEndTimeHHmm = useCreateMatchWizard((s) => s.setEndTimeHHmm);
-  const setGameType = useCreateMatchWizard((s) => s.setGameType);
+  const setSlotDurationMin = useCreateMatchWizard((s) => s.setSlotDurationMin);
+
+  const reset = useCreateMatchWizard((s) => s.reset);
+
+  const [timeCategory, setTimeCategory] = useState<'all' | 'morning' | 'afternoon' | 'evening' | 'night'>('all');
+  const upcomingDays = useMemo(() => getUpcomingDays(7), []);
 
   const [showTeams, setShowTeams] = useState(false);
-  const [showDate, setShowDate] = useState(false);
-  const [showTime, setShowTime] = useState(false);
-  const [showEndTime, setShowEndTime] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [errorFor, setErrorFor] = useState<{ answers: string; message: string } | null>(null);
 
   // Which of the two flows this submit belongs to. Everything team-shaped on
   // this screen is gated on it.
@@ -267,7 +192,6 @@ export default function MatchDetailsStep(): React.ReactNode {
   const post = usePostOpenChallenge(teamId ?? '');
   // Post a Match: no team anywhere in the payload.
   const createOpen = useCreateOpenMatch();
-  const submitting = isOpenMatch ? createOpen.isPending : post.isPending;
   const teams = useMyTeamsOverview();
   const sportLabel = useSportLabel();
 
@@ -283,6 +207,71 @@ export default function MatchDetailsStep(): React.ReactNode {
     [ownedTeams, teamId],
   );
 
+  const setTeamFormat = useSetTeamFormat(teamId ?? '');
+  // The format re-declaration is part of the same submit, so the button has to
+  // stay busy through it or a second tap fires a second post. Declared after
+  // the mutation it reads, not above it.
+  const submitting = isOpenMatch
+    ? createOpen.isPending
+    : post.isPending || setTeamFormat.isPending;
+
+  /*
+    THE FORMAT IS THE TEAM'S, and this screen may change it.
+
+    Strict format-to-format matchmaking judges every team by one number --
+    `teams.target_size`, its declared players per side -- on both sides of every
+    fixture. So a captain who posts a 6 v 6 from a team declared as 4 v 4 would
+    be asking for opponents by a yardstick their own team fails; the server
+    refuses that insert with FORMAT_MISMATCH rather than quietly allowing the
+    asymmetry.
+
+    The override still exists, it is just honest: picking a different size here
+    re-declares the team's format first, then posts. That is one extra write on
+    the uncommon path and none on the common one.
+  */
+  const teamFormat = team?.target_size ?? null;
+  /*
+    A NULL format needs syncing too — that was the bug.
+
+    This condition used to require `teamFormat !== null`, so a team that had
+    never declared a format skipped the sync entirely and went straight to
+    `post_open_challenge`, where the insert trigger refused it with
+    FORMAT_MISMATCH. Every team is created with `target_size` null and nothing
+    in the create-team flow sets it, so this hit EVERY newly created team on its
+    first fixture: the red "different format from your team" banner on a screen
+    where the user had picked no other format.
+
+    Null is not "already matches" — it is "not declared yet", which is precisely
+    when the sync is needed. Comparing the two values directly covers both the
+    undeclared case and a genuine override.
+  */
+  const needsFormatSync =
+    !isOpenMatch && playersPerSide !== null && teamFormat !== playersPerSide;
+
+  /*
+    A submit error describes the answers as they were WHEN IT FAILED.
+
+    `error` was only cleared at the start of the next submit, so a refusal stayed
+    on screen while the user changed the very thing it was complaining about —
+    which is how a "different format from your team" banner ended up sitting
+    under a freshly picked 4 v 4.
+
+    So the message is stored WITH the answers it was raised against, and shown
+    only while those still hold. Derived during render rather than cleared by an
+    effect: an effect would need a render with the stale banner still up before
+    it could take it down.
+  */
+  const answerSig = [playersPerSide, teamId, dayOffset, timeHHmm, endTimeHHmm, matchType].join('|');
+  const error = errorFor && errorFor.answers === answerSig ? errorFor.message : null;
+  const setError = (message: string | null): void =>
+    setErrorFor(message === null ? null : { answers: answerSig, message });
+
+  // Only meaningful for a team fixture; an open game is filled by individuals.
+  const shortBy =
+    !isOpenMatch && team && playersPerSide !== null
+      ? Math.max(playersPerSide - team.player_count, 0)
+      : 0;
+
   // If the organiser owns exactly one team for this sport and has not chosen one yet,
   // select it automatically so they don't have to tap an extra sheet.
   useEffect(() => {
@@ -291,20 +280,28 @@ export default function MatchDetailsStep(): React.ReactNode {
     }
   }, [isOpenMatch, teamId, ownedTeams, setTeamId]);
 
+  /*
+    The team's own format is the default answer, not an empty chip row.
+
+    A squad that has declared itself 6 v 6 is almost always posting a 6 v 6, and
+    leaving the question blank invites the one answer that costs an extra write
+    and a re-declaration. Only pre-fills an unanswered form -- an explicit
+    choice, including a deliberate override, is never overwritten.
+  */
+  useEffect(() => {
+    if (!isOpenMatch && playersPerSide === null && teamFormat !== null) {
+      setPlayersPerSide(teamFormat);
+    }
+  }, [isOpenMatch, playersPerSide, teamFormat, setPlayersPerSide]);
+
   const sizeOptions = sport ? PLAYERS_PER_SIDE[sport] : [];
   const totalSlots = playersPerSide !== null ? playersPerSide * 2 : 0;
   const time = parseHHmm(timeHHmm);
-  const endTime = parseHHmm(endTimeHHmm);
   const now = new Date();
   const radiusKm = Math.round(searchRadiusM / 1000);
 
   const { index, total: totalSteps } = stepPosition('details');
 
-  // The picker allows any end time; an earlier one means the game runs past
-  // midnight, and buildEndAt rolls it onto the next day. Showing the duration
-  // is what makes that visible instead of surprising.
-  const endsAt =
-    dayOffset !== null && time ? buildEndAt(dayOffset, timeHHmm, endTimeHHmm || null) : null;
   const startsAt = dayOffset !== null && time ? buildScheduledAt(dayOffset, timeHHmm) : null;
 
   /**
@@ -326,13 +323,30 @@ export default function MatchDetailsStep(): React.ReactNode {
 
   const validation = ((): { ok: boolean; msg: string } => {
     if (!sport) return { ok: false, msg: 'Pick a sport' };
-    if (!matchType) return { ok: false, msg: 'Pick a match type' };
+    if (!matchType) return { ok: false, msg: 'Pick a game type' };
     if (!areaName || areaName.trim().length < 2) return { ok: false, msg: 'Select a play area' };
     // The one question that exists on only one branch.
     if (!isOpenMatch && !teamId) return { ok: false, msg: 'Select Team A' };
     if (playersPerSide === null) return { ok: false, msg: 'Choose the number of players' };
+    /*
+      A team fixture needs a real side. Owner's call after seeing a 1-player
+      squad post a 4 v 4: this now BLOCKS rather than warns.
+
+      Only for Team Vs Team -- an open game is filled by individual players who
+      join, so a short squad there is the normal case, not an error.
+    */
+    if (shortBy > 0) {
+      return {
+        ok: false,
+        msg: `${team?.name ?? 'Your team'} needs ${shortBy} more player${shortBy === 1 ? '' : 's'} for ${playersPerSide} v ${playersPerSide}`,
+      };
+    }
     if (dayOffset === null) return { ok: false, msg: 'Pick a date' };
-    if (!time) return { ok: false, msg: 'Pick a start time' };
+    // One chip sets both ends, so either being empty means no window was
+    // picked. The window is mandatory because everything downstream depends on
+    // `end_time`: every later round inherits it, create_rematch refuses once it
+    // has passed, and expire_stale_matches closes the game on it.
+    if (!time || !endTimeHHmm) return { ok: false, msg: 'Pick when you are free' };
 
     const composed = isOpenMatch
       ? CreateOpenMatchSchema.safeParse({
@@ -342,9 +356,8 @@ export default function MatchDetailsStep(): React.ReactNode {
           dayOffset,
           timeHHmm,
           totalSlots,
-          gameType,
           radiusM: searchRadiusM,
-          endTimeHHmm: endTimeHHmm || undefined,
+          endTimeHHmm,
           lat: areaCoords?.lat,
           lng: areaCoords?.lng,
         })
@@ -356,8 +369,7 @@ export default function MatchDetailsStep(): React.ReactNode {
           totalSlots,
           message: `${playersPerSide} v ${playersPerSide}`,
           radiusM: searchRadiusM,
-          gameType,
-          endTimeHHmm: endTimeHHmm || undefined,
+          endTimeHHmm,
           lat: areaCoords?.lat,
           lng: areaCoords?.lng,
         });
@@ -369,7 +381,8 @@ export default function MatchDetailsStep(): React.ReactNode {
     if (dayOffset === 0) {
       const chosen = new Date();
       chosen.setHours(time.h, time.m, 0, 0);
-      if (chosen.getTime() <= now.getTime()) return { ok: false, msg: 'Pick a time later today' };
+      if (chosen.getTime() <= now.getTime())
+        return { ok: false, msg: `${format12h(timeHHmm ?? '')} has already started. Pick a later slot.` };
     }
     return { ok: true, msg: '' };
   })();
@@ -398,18 +411,18 @@ export default function MatchDetailsStep(): React.ReactNode {
           sport,
           areaName,
           scheduledAt: startsAt.toISOString(),
-          endTime: buildEndAt(dayOffset, timeHHmm, endTimeHHmm || null)?.toISOString() ?? null,
+          endTime: buildEndAt(dayOffset, timeHHmm, endTimeHHmm)?.toISOString() ?? null,
           totalSlots,
-          gameType,
           radiusM: searchRadiusM,
           lat: areaCoords?.lat ?? null,
           lng: areaCoords?.lng ?? null,
         });
+        reset();
         // `replace` so hardware back leaves the wizard rather than re-submitting
         // this step, same as the challenge branch below.
         router.replace({ pathname: '/match/[id]', params: { id: match.id } });
       } catch (e) {
-        setError(e instanceof AppError ? e.message : 'Could not post the match. Please try again.');
+        setError(e instanceof AppError ? e.message : 'Could not post the game. Please try again.');
       }
       return;
     }
@@ -423,6 +436,18 @@ export default function MatchDetailsStep(): React.ReactNode {
     }
 
     try {
+      /*
+        Re-declare first, post second, and never the other way round.
+
+        The insert trigger on team_challenges compares the fixture's format with
+        the posting team's, so posting first would simply fail. Awaited rather
+        than fired and forgotten: if the re-declaration is refused (a squad too
+        small for the size just picked), the post must not happen at all.
+      */
+      if (needsFormatSync && playersPerSide !== null) {
+        await setTeamFormat.mutateAsync(playersPerSide);
+      }
+
       const challenge = await post.mutateAsync({
         matchName: derivedName,
         areaName,
@@ -431,11 +456,11 @@ export default function MatchDetailsStep(): React.ReactNode {
         totalSlots,
         message: `${playersPerSide} v ${playersPerSide}`,
         radiusM: searchRadiusM,
-        gameType,
-        endTimeHHmm: endTimeHHmm || undefined,
+        endTimeHHmm,
         lat: areaCoords?.lat ?? undefined,
         lng: areaCoords?.lng ?? undefined,
       });
+      reset();
       // The organiser goes to the radar, which polls the offer ledger for the
       // challenge just posted. `replace` so hardware back leaves the wizard
       // rather than re-submitting this step; the id travels as a param because
@@ -445,7 +470,7 @@ export default function MatchDetailsStep(): React.ReactNode {
         params: { challengeId: challenge.id },
       });
     } catch (e) {
-      setError(e instanceof AppError ? e.message : 'Could not post the match. Please try again.');
+      setError(e instanceof AppError ? e.message : 'Could not post the game. Please try again.');
     }
   };
 
@@ -457,11 +482,10 @@ export default function MatchDetailsStep(): React.ReactNode {
   };
 
   // Time picker restricts to the future when the selected day is today.
-  const startFloor = dayOffset === 0 ? now.getHours() * 60 + now.getMinutes() : null;
 
   return (
     <WizardScreen
-      title="Match Details"
+      title="Game Details"
       stepIndex={index}
       totalSteps={totalSteps}
       primaryLabel={
@@ -470,7 +494,7 @@ export default function MatchDetailsStep(): React.ReactNode {
             ? 'Posting…'
             : 'Searching…'
           : isOpenMatch
-            ? 'Post Match'
+            ? 'Post Game'
             : 'Find Opponent (Radar)'
       }
       primaryDisabled={!validation.ok || submitting}
@@ -507,15 +531,15 @@ export default function MatchDetailsStep(): React.ReactNode {
               {sportLabel(sport)}
             </AppText>
             <AppText variant="caption" color={M.muted}>
-              {matchType === 'team_vs_team' ? 'Team Vs Team (Challenge)' : 'Post a Match (Open for all)'}
+              {matchType === 'team_vs_team' ? 'Team Vs Team (Challenge)' : 'Post a Game (Open for all)'}
             </AppText>
           </View>
         </View>
       ) : (
         <StepState
           kind="empty"
-          message="No game chosen yet."
-          actionLabel="Choose a game"
+          message="No sport chosen yet."
+          actionLabel="Choose a sport"
           onAction={() => router.replace('/match/create')}
         />
       )}
@@ -524,6 +548,9 @@ export default function MatchDetailsStep(): React.ReactNode {
       <SectionLabel>PLAY AREA</SectionLabel>
       {areaName ? (
         <View style={styles.readonlyRow}>
+          <View style={[styles.logo, styles.logoFallback]}>
+            <IconPin color={M.green} size={20} />
+          </View>
           <View style={styles.rowText}>
             <AppText variant="label" color={M.text} numberOfLines={1}>
               {areaName}
@@ -538,6 +565,7 @@ export default function MatchDetailsStep(): React.ReactNode {
             accessibilityRole="button"
             accessibilityLabel="Change play area"
           >
+            <IconEdit color={M.green} size={16} />
             <AppText variant="label" color={M.green}>
               Change
             </AppText>
@@ -632,73 +660,194 @@ export default function MatchDetailsStep(): React.ReactNode {
         </>
       ) : null}
 
-      {/* ---------------- Date and time ---------------- */}
-      <SectionLabel>DATE</SectionLabel>
-      <Pressable
-        style={styles.dtField}
-        onPress={() => setShowDate(true)}
-        accessibilityRole="button"
-        accessibilityLabel="Select date"
+      {/* ---------------- Date Selection (Playo Style) ---------------- */}
+      <SectionLabel>SELECT MATCH DATE</SectionLabel>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.dateStripScroll}
       >
-        <AppText color={dayOffset === null ? M.muted : M.text}>
-          {dayOffset === null ? 'Select date' : labelForDay(dayOffset)}
-        </AppText>
-        <IconCalendar color={M.muted} size={18} />
-      </Pressable>
+        {upcomingDays.map((item) => {
+          const isSelected = dayOffset === item.offset;
+          return (
+            <Pressable
+              key={item.offset}
+              onPress={() => setDayOffset(item.offset)}
+              accessibilityRole="button"
+              accessibilityLabel={`${item.dayLabel}, ${item.dayNumber} ${item.monthLabel}`}
+              accessibilityState={{ selected: isSelected }}
+              style={({ pressed }) => [
+                styles.dateChip,
+                isSelected && styles.dateChipSelected,
+                pressed && { opacity: 0.85 },
+              ]}
+            >
+              <AppText
+                variant="caption"
+                color={isSelected ? M.limeInk : M.muted}
+                style={[styles.dateChipDay, isSelected && { fontWeight: '700' }]}
+              >
+                {item.dayLabel}
+              </AppText>
+              <AppText
+                variant="heading"
+                color={isSelected ? M.limeInk : M.text}
+                style={[styles.dateChipNum, isSelected && { fontWeight: '800' }]}
+              >
+                {item.dayNumber}
+              </AppText>
+              <AppText
+                variant="caption"
+                color={isSelected ? M.limeInk : M.muted}
+                style={[styles.dateChipMonth, isSelected && { fontWeight: '700' }]}
+              >
+                {item.monthLabel}
+              </AppText>
+            </Pressable>
+          );
+        })}
+      </ScrollView>
 
-      <SectionLabel>MATCH START TIME</SectionLabel>
-      <Pressable
-        style={styles.dtField}
-        onPress={() => setShowTime(true)}
-        accessibilityRole="button"
-        accessibilityLabel="Select match start time"
-      >
-        <AppText color={time === null ? M.muted : M.text}>
-          {time === null ? 'Select start time' : to12h(time.h, time.m)}
-        </AppText>
-        <IconClock color={M.muted} size={18} />
-      </Pressable>
+      {/* ---------------- Match Duration ---------------- */}
+      <SectionLabel>MATCH DURATION</SectionLabel>
+      <View style={styles.chipRow}>
+        {[60, 90, 120, 180].map((dur) => (
+          <Chip
+            key={dur}
+            label={dur === 60 ? '1 hr' : dur === 90 ? '1.5 hrs' : dur === 120 ? '2 hrs' : '3 hrs'}
+            on={slotDurationMin === dur}
+            /*
+              One setter, not two. `setSlotDurationMin` already recomputes the
+              end time from the current start; the extra `setEndTimeHHmm` that
+              used to follow it was what nulled the duration and snapped the
+              chip back to 1 hr.
+            */
+            onPress={() => setSlotDurationMin(dur)}
+          />
+        ))}
+      </View>
 
-      <SectionLabel>MATCH END TIME</SectionLabel>
-      <Pressable
-        style={styles.dtField}
-        onPress={() => setShowEndTime(true)}
-        disabled={time === null}
-        accessibilityRole="button"
-        accessibilityLabel="Select match end time"
-        accessibilityState={{ disabled: time === null }}
-      >
-        <AppText color={endTimeHHmm ? M.text : M.muted}>
-          {time === null
-            ? 'Pick a start time first'
-            : endTime
-              ? to12h(endTime.h, endTime.m)
-              : 'Leave open'}
-        </AppText>
-        <IconClock color={M.muted} size={18} />
-      </Pressable>
-      {endsAt && startsAt ? (
-        <View style={styles.endRow}>
-          <AppText variant="caption" color={M.muted}>
-            {`Runs ${durationLabel(startsAt.getTime(), endsAt.getTime())}`}
+      {/* ---------------- Available Time Slots (Playo Style) ---------------- */}
+      <SectionLabel>AVAILABLE TIME SLOTS</SectionLabel>
+
+      {/* Time of Day Filter Tabs */}
+      <View style={styles.timeCategoryRow}>
+        {TIME_CATEGORIES.map((cat) => {
+          const active = timeCategory === cat.key;
+          return (
+            <Pressable
+              key={cat.key}
+              onPress={() => setTimeCategory(cat.key)}
+              style={[styles.timeCategoryChip, active && styles.timeCategoryChipActive]}
+              accessibilityRole="button"
+              accessibilityState={{ selected: active }}
+            >
+              <AppText
+                variant="caption"
+                color={active ? M.green : M.muted}
+                style={{ fontWeight: active ? '700' : '500', fontSize: 12 }}
+              >
+                {cat.label}
+              </AppText>
+            </Pressable>
+          );
+        })}
+      </View>
+
+      {/* Hourly Slot Cards Grid */}
+      <View style={styles.slotGrid}>
+        {HOURLY_SLOTS.filter((s) => {
+          const hour = parseInt(s.split(':')[0] ?? '0', 10);
+          if (timeCategory === 'morning') return hour >= 6 && hour < 12;
+          if (timeCategory === 'afternoon') return hour >= 12 && hour < 17;
+          if (timeCategory === 'evening') return hour >= 17 && hour < 21;
+          if (timeCategory === 'night') return hour >= 21 || hour < 6;
+          return true;
+        }).map((s) => {
+          const [h = 0, m = 0] = s.split(':').map(Number);
+          const dur = slotDurationMin ?? 60;
+          const minsNow = now.getHours() * 60 + now.getMinutes();
+          // A game cannot be posted to start in the past, so a slot is gone the
+          // minute it begins -- the same rule the submit guard applies. Judging
+          // it by its END left 10:00 tappable at 10:42 and then refused it.
+          const isPast = dayOffset === 0 && h * 60 + m <= minsNow;
+          const isSelected = timeHHmm === s;
+          const endStr = addMinutesHHmm(s, dur);
+          const formattedStart = format12h(s);
+          const formattedEnd = format12h(endStr);
+
+          return (
+            <Pressable
+              key={s}
+              disabled={isPast}
+              // `setTimeHHmm` derives the end time from the chosen duration, so
+              // picking a slot keeps the 2 hr / 3 hr the user already selected.
+              onPress={() => setTimeHHmm(s)}
+              style={({ pressed }) => [
+                styles.slotCard,
+                isSelected && styles.slotCardSelected,
+                isPast && styles.slotCardPast,
+                pressed && !isPast && { opacity: 0.85 },
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel={`${formattedStart} to ${formattedEnd}, ${isPast ? 'Past' : isSelected ? 'Selected' : 'Available'}`}
+              accessibilityState={{ selected: isSelected, disabled: isPast }}
+            >
+              <AppText
+                variant="label"
+                color={isSelected ? M.green : isPast ? M.muted : M.text}
+                style={[styles.slotTimeStart, isSelected && { color: M.green }]}
+              >
+                {formattedStart}
+              </AppText>
+              <AppText
+                variant="caption"
+                color={M.muted}
+                style={styles.slotTimeSub}
+                numberOfLines={1}
+              >
+                {`to ${formattedEnd}`}
+              </AppText>
+              <View
+                style={[
+                  styles.slotBadge,
+                  isSelected
+                    ? styles.slotBadgeSelected
+                    : isPast
+                    ? styles.slotBadgePast
+                    : styles.slotBadgeAvailable,
+                ]}
+              >
+                <AppText
+                  variant="caption"
+                  color={isSelected ? M.limeInk : isPast ? M.faint : M.green}
+                  style={{ fontSize: 9, fontWeight: '700', textTransform: 'uppercase' }}
+                >
+                  {isSelected ? '⚡ Selected' : isPast ? 'Past' : 'Available'}
+                </AppText>
+              </View>
+            </Pressable>
+          );
+        })}
+      </View>
+
+      {/* Selected Slot Summary Banner */}
+      {timeHHmm && endTimeHHmm ? (
+        <View style={styles.selectedSlotBanner}>
+          <AppText variant="caption" color={M.green} style={{ fontWeight: '700' }} center>
+            {`✓ Match Slot: ${labelForDay(dayOffset ?? 0)} · ${format12h(timeHHmm)} – ${format12h(endTimeHHmm)} (${slotDurationMin === 60 ? '1 hr' : slotDurationMin === 90 ? '1.5 hrs' : slotDurationMin === 120 ? '2 hrs' : '3 hrs'})`}
           </AppText>
-          <Pressable
-            onPress={() => setEndTimeHHmm('')}
-            style={styles.linkBtn}
-            accessibilityRole="button"
-            accessibilityLabel="Clear end time"
-          >
-            <AppText variant="caption" color={M.green}>
-              Clear
-            </AppText>
-          </Pressable>
         </View>
-      ) : null}
+      ) : (
+        <AppText variant="caption" color={M.faint} style={{ marginTop: S.xs }}>
+          Tap an available slot above to set match time.
+        </AppText>
+      )}
 
       {/* ---------------- Squad size ---------------- */}
       <SectionLabel>NUMBER OF PLAYERS</SectionLabel>
       {sizeOptions.length === 0 ? (
-        <StepState kind="empty" message="Pick a game first to choose a squad size." />
+        <StepState kind="empty" message="Pick a sport first to choose a squad size." />
       ) : (
         <>
           <View style={styles.chipRow}>
@@ -711,6 +860,59 @@ export default function MatchDetailsStep(): React.ReactNode {
               />
             ))}
           </View>
+          {/*
+            Short squad BLOCKS a team fixture (the submit guard refuses it too;
+            this is the explanation, not the boundary). One way out now: the
+            invite code. The Find Players board — strangers asking to join a
+            squad — was removed on 3 Sep 2026, so a squad grows by invitation.
+          */}
+          {shortBy > 0 ? (
+            <View style={styles.squadWarn}>
+              <AppText variant="label" color={M.danger}>
+                {`${playersPerSide} v ${playersPerSide} needs ${playersPerSide} players — ${team?.name ?? 'your team'} has ${team?.player_count ?? 0}`}
+              </AppText>
+              <AppText variant="caption" color={M.muted}>
+                {`Add ${shortBy} more before you can find an opponent.`}
+              </AppText>
+              <View style={styles.squadWarnRow}>
+                <Pressable
+                  onPress={() => router.push(`/teams/${teamId}/invite`)}
+                  accessibilityRole="button"
+                  style={styles.squadWarnBtn}
+                >
+                  <AppText variant="caption" color={M.green} style={{ fontWeight: '700' }}>
+                    Invite players by code
+                  </AppText>
+                </Pressable>
+              </View>
+            </View>
+          ) : null}
+
+          {/*
+            Says out loud that this size is a FILTER, not a preference — the one
+            thing about strict matching a captain has to understand before they
+            wonder where all the teams went.
+          */}
+          {!isOpenMatch && playersPerSide !== null ? (
+            <View style={styles.formatNote}>
+              <AppText variant="caption" color={M.green} center>
+                {`You will only be shown ${playersPerSide} v ${playersPerSide} teams, and only they can challenge you.`}
+              </AppText>
+            </View>
+          ) : null}
+
+          {/* Setting or changing the team's format. Said before the submit, not
+              discovered after it. Two different sentences, because "you have not
+              picked a format yet" and "you are changing the one you picked" are
+              not the same message. */}
+          {needsFormatSync ? (
+            <AppText variant="caption" color={M.muted} style={styles.helper}>
+              {teamFormat === null
+                ? `${team?.name ?? 'Your team'} has no format set yet. Posting this makes it a ${playersPerSide} v ${playersPerSide} side.`
+                : `${team?.name ?? 'Your team'} is set to ${teamFormat} v ${teamFormat}. Posting this changes it to ${playersPerSide} v ${playersPerSide} for future games too.`}
+            </AppText>
+          ) : null}
+
           <AppText variant="caption" color={M.faint} style={styles.helper}>
             {playersPerSide === null
               ? isOpenMatch
@@ -722,19 +924,6 @@ export default function MatchDetailsStep(): React.ReactNode {
           </AppText>
         </>
       )}
-
-      {/* ---------------- Game type ---------------- */}
-      <SectionLabel>GAME TYPE</SectionLabel>
-      <View style={styles.chipRow}>
-        {GAME_TYPES.map((g) => (
-          <Chip
-            key={g.value}
-            label={g.label}
-            on={gameType === g.value}
-            onPress={() => setGameType(g.value)}
-          />
-        ))}
-      </View>
 
       {/* ---------------- Pickers ---------------- */}
       <Modal
@@ -748,7 +937,7 @@ export default function MatchDetailsStep(): React.ReactNode {
           onPress={() => setShowTeams(false)}
           accessibilityRole="button"
         />
-        <View style={styles.sheet}>
+        <View style={[styles.sheet, sheetInsets]}>
           <View style={styles.sheetHead}>
             <AppText variant="heading" color={M.text}>
               Select Team A
@@ -763,7 +952,10 @@ export default function MatchDetailsStep(): React.ReactNode {
               <IconClose color={M.muted} size={20} />
             </Pressable>
           </View>
-          <ScrollView style={styles.dateList} showsVerticalScrollIndicator={false}>
+          <ScrollView
+            style={[styles.dateList, { maxHeight: pickerListHeight }]}
+            showsVerticalScrollIndicator={false}
+          >
             {ownedTeams.map((t) => {
               const on = t.id === teamId;
               return (
@@ -815,74 +1007,6 @@ export default function MatchDetailsStep(): React.ReactNode {
           </Pressable>
         </View>
       </Modal>
-
-      <Modal
-        transparent
-        visible={showDate}
-        animationType="slide"
-        onRequestClose={() => setShowDate(false)}
-      >
-        <Pressable
-          style={styles.sheetBackdrop}
-          onPress={() => setShowDate(false)}
-          accessibilityRole="button"
-        />
-        <View style={styles.sheet}>
-          <View style={styles.sheetHead}>
-            <AppText variant="heading" color={M.text}>
-              Select date
-            </AppText>
-            <Pressable
-              hitSlop={10}
-              onPress={() => setShowDate(false)}
-              style={styles.sheetClose}
-              accessibilityRole="button"
-              accessibilityLabel="Close"
-            >
-              <IconClose color={M.muted} size={20} />
-            </Pressable>
-          </View>
-          <ScrollView style={styles.dateList} showsVerticalScrollIndicator={false}>
-            {Array.from({ length: 14 }, (_, i) => i).map((offset) => {
-              const on = dayOffset === offset;
-              return (
-                <Pressable
-                  key={offset}
-                  style={[styles.pickerRow, on ? styles.pickerRowOn : null]}
-                  onPress={() => {
-                    setDayOffset(offset);
-                    setShowDate(false);
-                  }}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: on }}
-                >
-                  <AppText variant="label" color={on ? M.green : M.text}>
-                    {labelForDay(offset)}
-                  </AppText>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
-        </View>
-      </Modal>
-
-      <TimeSheet
-        visible={showTime}
-        title="Match start time"
-        value={time}
-        minTotal={startFloor}
-        onPick={(next) => setTimeHHmm(fmtHHmm(next.h, next.m))}
-        onClose={() => setShowTime(false)}
-      />
-
-      <TimeSheet
-        visible={showEndTime}
-        title="Match end time"
-        value={endTime}
-        minTotal={null}
-        onPick={(next) => setEndTimeHHmm(fmtHHmm(next.h, next.m))}
-        onClose={() => setShowEndTime(false)}
-      />
     </WizardScreen>
   );
 }
@@ -890,6 +1014,24 @@ export default function MatchDetailsStep(): React.ReactNode {
 const makeStyles = (M: MockPalette) =>
   StyleSheet.create({
     rowText: { flex: 1, gap: 2 },
+    squadWarn: {
+      gap: 4,
+      padding: S.md,
+      borderRadius: R.md,
+      borderWidth: 1,
+      borderColor: M.border,
+      marginTop: S.sm,
+    },
+    formatNote: {
+      marginTop: S.sm,
+      padding: S.sm,
+      borderRadius: R.md,
+      borderWidth: 1,
+      borderColor: M.green,
+      backgroundColor: M.iconChip,
+    },
+    squadWarnRow: { flexDirection: 'row', gap: S.md },
+    squadWarnBtn: { alignSelf: 'flex-start', paddingVertical: S.xs },
     helper: { marginTop: S.sm },
     openBanner: {
       padding: S.sm + 2,
@@ -900,13 +1042,135 @@ const makeStyles = (M: MockPalette) =>
       backgroundColor: M.iconChip,
     },
     chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: S.sm },
+    dateStripScroll: {
+      paddingVertical: S.xs,
+      gap: S.sm,
+      marginBottom: S.sm,
+    },
+    dateChip: {
+      // min, not fixed: the chip holds a weekday abbreviation and a number, and
+      // both grow with the OS font setting. At default scale this renders at
+      // exactly the old 62x74.
+      minWidth: 70,
+      minHeight: 84,
+      paddingHorizontal: S.xs,
+      borderRadius: R.lg,
+      backgroundColor: M.card,
+      borderWidth: 1,
+      borderColor: M.border,
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 2,
+    },
+    dateChipSelected: {
+      backgroundColor: M.green,
+      borderColor: M.green,
+    },
+    dateChipDay: {
+      fontSize: 11,
+      fontWeight: '600',
+    },
+    dateChipNum: {
+      fontFamily: 'SpaceGrotesk_700Bold',
+      fontSize: 20,
+      fontWeight: '700',
+    },
+    dateChipMonth: {
+      fontSize: 11,
+      fontWeight: '600',
+    },
+    timeCategoryRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 6,
+      marginBottom: S.sm,
+    },
+    timeCategoryChip: {
+      minHeight: 38,
+      justifyContent: 'center',
+      paddingHorizontal: S.sm + 4,
+      borderRadius: R.pill,
+      backgroundColor: M.card,
+      borderWidth: 1,
+      borderColor: M.border,
+    },
+    timeCategoryChipActive: {
+      backgroundColor: M.chip,
+      borderColor: M.green,
+      borderWidth: 1.5,
+    },
+    slotGrid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: S.sm,
+    },
+    slotCard: {
+      // Three to a row: a third of the width, less two S.sm gaps shared out.
+      flexBasis: '30%',
+      flexGrow: 1,
+      maxWidth: '32%',
+      borderRadius: R.lg,
+      borderWidth: 1,
+      borderColor: M.border,
+      backgroundColor: M.card,
+      paddingVertical: S.sm + 2,
+      paddingHorizontal: S.sm,
+      alignItems: 'center',
+      justifyContent: 'center',
+      minHeight: 86,
+      gap: 4,
+    },
+    slotCardSelected: {
+      backgroundColor: M.chip,
+      borderColor: M.green,
+      borderWidth: 2,
+    },
+    slotCardPast: {
+      opacity: 0.35,
+    },
+    slotTimeStart: {
+      fontFamily: 'SpaceGrotesk_700Bold',
+      fontSize: 14,
+      fontWeight: '700',
+    },
+    slotTimeSub: {
+      fontSize: 11,
+      fontWeight: '500',
+    },
+    slotBadge: {
+      paddingHorizontal: S.sm,
+      paddingVertical: 2,
+      borderRadius: R.pill,
+      borderWidth: 1,
+      marginTop: 2,
+    },
+    slotBadgeAvailable: {
+      borderColor: M.green,
+      backgroundColor: 'transparent',
+    },
+    slotBadgeSelected: {
+      borderColor: M.green,
+      backgroundColor: M.green,
+    },
+    slotBadgePast: {
+      borderColor: M.border,
+      backgroundColor: 'transparent',
+    },
+    selectedSlotBanner: {
+      marginTop: S.sm,
+      padding: S.sm + 2,
+      borderRadius: R.md,
+      borderWidth: 1,
+      borderColor: M.green,
+      backgroundColor: M.iconChip,
+    },
     readonlyRow: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: S.md,
-      minHeight: 72,
-      padding: S.sm + 2,
-      borderRadius: R.lg,
+      minHeight: 76,
+      padding: S.sm + 4,
+      borderRadius: 20,
       borderWidth: 1,
       borderColor: M.border,
       backgroundColor: M.card,
@@ -940,10 +1204,15 @@ const makeStyles = (M: MockPalette) =>
     logo: { width: 48, height: 48, borderRadius: R.pill, backgroundColor: M.chip },
     logoFallback: { alignItems: 'center', justifyContent: 'center', backgroundColor: M.iconChip },
     linkBtn: {
+      flexDirection: 'row',
+      gap: 6,
       minHeight: TOUCH,
       paddingHorizontal: S.md,
       alignItems: 'center',
       justifyContent: 'center',
+      borderRadius: R.pill,
+      borderWidth: 1.5,
+      borderColor: M.green,
     },
     dtField: {
       flexDirection: 'row',
@@ -995,7 +1264,8 @@ const makeStyles = (M: MockPalette) =>
       alignItems: 'flex-end',
       justifyContent: 'center',
     },
-    dateList: { maxHeight: 320 },
+    // maxHeight is applied at the call site from clampHeight().
+    dateList: {},
     pickerRow: {
       minHeight: TOUCH,
       justifyContent: 'center',
@@ -1013,7 +1283,10 @@ const makeStyles = (M: MockPalette) =>
       borderRadius: R.md,
     },
     pickerRowOn: { backgroundColor: M.iconChip },
-    timeCols: { flexDirection: 'row', gap: S.md, height: 220 },
+    // Dead style: nothing renders `timeCols` any more (the wizard asks for a
+    // play WINDOW, not two time columns). Kept minus its old `height: 220` so
+    // it cannot be revived with a fixed height baked in.
+    timeCols: { flexDirection: 'row', gap: S.md },
     timeCol: {
       flex: 1,
       backgroundColor: M.bg,

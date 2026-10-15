@@ -1,0 +1,71 @@
+# What EAS Build uploads. When this file exists EAS uses it INSTEAD of
+# .gitignore, so everything from .gitignore is repeated below, followed by
+# files that are in the folder but have no business in a cloud build.
+
+# Env & secrets — never commit
+.env
+.env.*
+!.env.example
+
+# Firebase / Google service account private keys. These grant server-side send
+# rights on your FCM project — leaking one lets anyone push to all your users.
+# They belong in EAS (`eas credentials`), never in the repo.
+#
+# NOTE: google-services.json is deliberately NOT ignored. It is not a secret
+# (it ships inside every APK) and EAS Build reads the project from git, so
+# ignoring it would break the Android build.
+*service-account*.json
+firebase-adminsdk-*.json
+*-firebase-adminsdk-*.json
+service-account-key.json
+
+# Dependencies
+node_modules/
+
+# Expo / Metro
+.expo/
+dist/
+web-build/
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Native builds
+ios/
+android/
+
+# Logs & OS
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+*.log
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Supabase local
+supabase/.branches/
+supabase/.temp/
+
+# --- EAS only: large or irrelevant, never needed to build the app ---
+*.apk
+_to_delete/
+_bmad/
+_bmad-output/
+.agents/
+.claude/
+.maestro/
+docs/
+skills/
+tests/
+grafana-provisioning/
+*.docx
+*.skill
+docker-compose.yml
+sixfour24_load_test.js
+generate_test_jwts.js

@@ -122,7 +122,7 @@ const makeStyles = (colors: AppColors) => StyleSheet.create({
 
   box: {
     width: 48,
-    height: 56,
+    minHeight: 56,
 
     borderRadius: 12,
 

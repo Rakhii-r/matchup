@@ -7,7 +7,6 @@ import {
   KeyboardAvoidingView,
   ScrollView,
   ImageBackground,
-  Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -20,8 +19,8 @@ import { useTheme } from '@shared/theme/ThemeContext';
 import { AppLogo } from '@shared/ui/AppLogo';
 import { AppText } from '@shared/ui/AppText';
 import { OtpBoxInput } from '@shared/ui/OtpBoxInput';
+import { PressableScale } from '@shared/ui/PressableScale';
 
-const { height: SCREEN_H } = Dimensions.get('window');
 const RESEND_SECONDS = 60;
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -154,7 +153,7 @@ export default function VerifyOtpScreen(): React.ReactNode {
             </View>
 
             {/* Verify button */}
-            <Pressable
+            <PressableScale
               onPress={onVerify}
               disabled={code.length !== 6 || loading}
               style={({ pressed }) => [
@@ -179,7 +178,7 @@ export default function VerifyOtpScreen(): React.ReactNode {
                   </Svg>
                 </View>
               </LinearGradient>
-            </Pressable>
+            </PressableScale>
 
             <Pressable onPress={() => router.back()} style={styles.changeNum}>
               <AppText variant="caption" color="rgba(255,255,255,0.6)" center>
@@ -196,7 +195,14 @@ export default function VerifyOtpScreen(): React.ReactNode {
 const makeStyles = (colors: AppColors) =>
   StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#050C19' },
-  bg: { flex: 1, minHeight: SCREEN_H },
+  /*
+    `flex: 1` already fills the scroll viewport. The `minHeight: SCREEN_H` that
+    used to sit beside it came from `Dimensions.get('window')` read ONCE at
+    module load, so it froze the launch-time height: wrong after a rotation,
+    wrong in split-screen, and wrong on a foldable that changes size while the
+    app is running. Removing it costs nothing and fixes all three.
+  */
+  bg: { flex: 1 },
   kav: { flex: 1 },
   scroll: {
     flexGrow: 1,

@@ -5,7 +5,6 @@ import {
   Animated,
   FlatList,
   Image,
-  ImageBackground,
   Pressable,
   StyleSheet,
   View,
@@ -14,13 +13,18 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { MotiView } from 'moti';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
+import { useAuthStore } from '@core/auth/authStore';
 import { showDemoMatches } from '@core/config/env';
 import { getCurrentCoords } from '@core/location/location';
 import type { Coords } from '@core/location/location';
 import { AppError } from '@core/errors/AppError';
+import { usePendingActions } from '@features/dashboard/presentation/useDashboard';
 import {
   useJoinedMatches,
   useJoinOpenMatch,
+  DEFAULT_SEARCH_RADIUS_M,
+  formatRadius,
+  SEARCH_RADII_M,
   useNearbyMatches,
   useRequestToJoinAny,
 } from '@features/matches/presentation/useMatches';
@@ -30,20 +34,33 @@ import {
   useMyChallenges,
   useNearbyOpenChallenges,
 } from '@features/teams/presentation/useChallenges';
+import { MatchOfferDetailModal } from '@features/teams/presentation/MatchOfferDetailModal';
+import {
+  formatLabel,
+  useActiveTeamFormat,
+} from '@features/teams/presentation/useActiveTeamFormat';
 import { useMyTeamsOverview } from '@features/teams/presentation/useTeams';
+import { recruitRepository } from '@features/teams/data/recruitRepository';
 import type { NearbyOpenChallenge } from '@features/teams/domain/challengeSchema';
 import { useSportLabel } from '@features/sports/presentation/useSports';
 import type { Match } from '@features/matches/domain/matchSchema';
 import type { MatchStatus, Sport } from '@shared/types/database.types';
 import { R, S, useMock, type MockPalette } from '@shared/theme/mockTheme';
+import { useResponsive, useTabContentPadding } from '@shared/theme/responsive';
 import { AppLogo } from '@shared/ui/AppLogo';
 import { AppText } from '@shared/ui/AppText';
+import { HillsArt, IconTile } from '@shared/ui/decor';
 import {
+  IconBadminton,
+  IconBell,
   IconChevron,
   IconClock,
+  IconCricket,
   IconPin,
   IconPlus,
   IconSend,
+  IconTarget,
+  IconUser,
 } from '@shared/ui/icons';
 import { SPORT_IMAGE } from '@shared/ui/sportImages';
 
@@ -58,7 +75,7 @@ function formatWhen(iso: string): string {
 }
 
 const SPORT_CARDS: { value: Sport; label: string }[] = [
-  { value: 'box_cricket', label: 'Cricket' },
+  { value: 'box_cricket', label: 'Box Cricket' },
   { value: 'badminton', label: 'Badminton' },
 ];
 
@@ -67,6 +84,7 @@ const STATUS_LABEL: Record<MatchStatus, string> = {
   locked: 'LOCKED',
   completed: 'DONE',
   cancelled: 'CANCELLED',
+  expired: 'TIME UP',
 };
 
 /**
@@ -152,7 +170,13 @@ function SkeletonCards(): React.ReactNode {
 }
 
 /** Premium empty state: pulsing location marker, headline, description, CTA. */
-function EmptyState({ onCreate }: { onCreate: () => void }): React.ReactNode {
+function EmptyState({
+  onCreate,
+  radiusM,
+}: {
+  onCreate: () => void;
+  radiusM: number;
+}): React.ReactNode {
   const M = useMock();
   const styles = useMemo(() => makeStyles(M), [M]);
   return (
@@ -174,7 +198,7 @@ function EmptyState({ onCreate }: { onCreate: () => void }): React.ReactNode {
         </View>
       </View>
       <AppText variant="heading" color={M.text} center style={{ fontSize: 19, marginTop: S.md }}>
-        No open matches within 5 km.
+        {radiusM > 0 ? `No open games within ${formatRadius(radiusM)}.` : 'No open games found.'}
       </AppText>
       <AppText color={M.muted} center style={{ marginTop: 4 }}>
         Be the first — create one!
@@ -182,7 +206,7 @@ function EmptyState({ onCreate }: { onCreate: () => void }): React.ReactNode {
       <ScalePressable onPress={onCreate} style={styles.emptyCta}>
         <IconPlus color={M.limeInk} size={18} />
         <AppText variant="label" color={M.limeInk} style={{ fontSize: 15, marginLeft: 6 }}>
-          Create Match
+          Create Game
         </AppText>
       </ScalePressable>
     </View>
@@ -191,6 +215,13 @@ function EmptyState({ onCreate }: { onCreate: () => void }): React.ReactNode {
 
 export default function NearbyScreen(): React.ReactNode {
   const M = useMock();
+  // Reserve the tab bar plus the device's bottom inset, or the last card in
+  // this list sits underneath the bar.
+  const tabContentPadding = useTabContentPadding();
+  // Share of the viewport rather than a flat 240, so the next card peeks by the
+  // same proportion on every phone.
+  const { railCardWidth } = useResponsive();
+  const challengeCardWidth = railCardWidth(0.68, 220, 300);
   const styles = useMemo(() => makeStyles(M), [M]);
   const router = useRouter();
   const [coords, setCoords] = useState<Coords | null>(null);
@@ -239,11 +270,26 @@ export default function NearbyScreen(): React.ReactNode {
     };
   }, []);
 
-  const nearby = useNearbyMatches(coords, sport);
-  const openChallenges = useNearbyOpenChallenges(coords, sport);
+  /*
+    Search distance was hard-wired to 5 km inside useNearbyMatches, so a player
+    in a quiet area had no way to look further out and simply saw an empty
+    screen. Screen state rather than a stored preference: it is a thing you
+    widen while looking, not a setting you keep.
+  */
+  const [radiusM, setRadiusM] = useState<number>(DEFAULT_SEARCH_RADIUS_M);
+
+  const nearby = useNearbyMatches(coords, sport, radiusM);
+
+  /*
+    Open team challenges across all formats (4v4, 6v6, etc.) so all matches
+    are visible and discoverable.
+  */
+  const activeFormat = useActiveTeamFormat(sport);
+  const openChallenges = useNearbyOpenChallenges(coords, sport, radiusM, null);
   const applyToChallenge = useApplyToChallenge();
   const myTeams = useMyTeamsOverview();
   const [challengingId, setChallengingId] = useState<string | null>(null);
+  const [selectedOffer, setSelectedOffer] = useState<NearbyOpenChallenge | null>(null);
   const sportLabel = useSportLabel();
 
   // A card must never offer to join something you are already on. The nearby
@@ -268,7 +314,7 @@ export default function NearbyScreen(): React.ReactNode {
 
   const openMatch = (item: Match) => {
     if (isDemoMatch(item.id)) {
-      Alert.alert('Sample match', 'This is placeholder data for the demo and cannot be joined.');
+      Alert.alert('Sample game', 'This is placeholder data for the demo and cannot be joined.');
       return;
     }
     if (item.status === 'completed') {
@@ -280,14 +326,17 @@ export default function NearbyScreen(): React.ReactNode {
 
   const onChallengeTeam = useCallback(
     (item: NearbyOpenChallenge) => {
-      const ownedMatching = (myTeams.data ?? []).filter(
+      // The fixture's format, from the one place it is ever derived.
+      const fixtureFormat = Math.max(Math.floor(item.total_slots / 2), 1);
+
+      const sameSportTeams = (myTeams.data ?? []).filter(
         (t) => t.i_am_owner && (!item.sport || t.sport === item.sport),
       );
 
-      if (ownedMatching.length === 0) {
+      if (sameSportTeams.length === 0) {
         Alert.alert(
           'Team needed',
-          `You need a ${item.sport === 'box_cricket' ? 'Cricket' : item.sport} team to challenge this squad. Create a team first!`,
+          `You need a ${item.sport === 'box_cricket' ? 'Cricket' : item.sport === 'badminton' ? 'Badminton' : (item.sport || 'sports')} team to challenge this squad. Create a team first!`,
           [
             { text: 'Cancel', style: 'cancel' },
             { text: 'Create Team', onPress: () => router.push('/teams/create') },
@@ -296,38 +345,62 @@ export default function NearbyScreen(): React.ReactNode {
         return;
       }
 
-      const send = (teamId: string) => {
-        setChallengingId(item.challenge_id);
-        applyToChallenge.mutate(
-          { challengeId: item.challenge_id, teamId },
-          {
-            onSuccess: () => {
-              setChallengingId(null);
-              Alert.alert(
-                'Challenge Sent! ⚡',
-                `Your request to play against ${item.from_team_name} was sent! Their captain has been notified to accept.`,
-              );
-              void openChallenges.refetch();
-            },
-            onError: (e: unknown) => {
-              setChallengingId(null);
-              const msg = e instanceof AppError ? e.message : 'Could not send challenge request.';
-              Alert.alert('Challenge Request', msg);
-            },
-          },
+      // Check which teams can field this format (player_count >= fixtureFormat)
+      const eligibleTeams = sameSportTeams.filter((t) => t.player_count >= fixtureFormat);
+
+      if (eligibleTeams.length === 0) {
+        const teamSummary = sameSportTeams
+          .map((t) => `"${t.name}" (${t.player_count} player${t.player_count === 1 ? '' : 's'})`)
+          .join(', ');
+        Alert.alert(
+          'Squad Too Small',
+          `${item.from_team_name} is looking for a ${formatLabel(fixtureFormat)} match, which requires at least ${fixtureFormat} players per side.\n\nYour squad: ${teamSummary}.\n\nAdd more players to your squad to challenge this match!`,
+          [{ text: 'OK' }],
         );
+        return;
+      }
+
+      const send = async (team: (typeof eligibleTeams)[0]) => {
+        setChallengingId(item.challenge_id);
+        try {
+          if (team.target_size !== fixtureFormat) {
+            await recruitRepository.setTeamFormat(team.id, fixtureFormat);
+          }
+          applyToChallenge.mutate(
+            { challengeId: item.challenge_id, teamId: team.id },
+            {
+              onSuccess: () => {
+                setChallengingId(null);
+                Alert.alert(
+                  'Challenge Sent! ⚡',
+                  `Your request to play against ${item.from_team_name} was sent! Their captain has been notified to accept.`,
+                );
+                void openChallenges.refetch();
+              },
+              onError: (e: unknown) => {
+                setChallengingId(null);
+                const msg = e instanceof AppError ? e.message : 'Could not send challenge request.';
+                Alert.alert('Challenge Request', msg);
+              },
+            },
+          );
+        } catch (e: unknown) {
+          setChallengingId(null);
+          const msg = e instanceof AppError ? e.message : 'Could not set squad format for challenge.';
+          Alert.alert('Challenge Request', msg);
+        }
       };
 
-      if (ownedMatching.length === 1 && ownedMatching[0]) {
-        send(ownedMatching[0].id);
+      if (eligibleTeams.length === 1 && eligibleTeams[0]) {
+        void send(eligibleTeams[0]);
       } else {
         Alert.alert(
           'Choose your Squad',
-          'Which of your teams would you like to challenge with?',
+          `Select which squad will challenge ${item.from_team_name} (${formatLabel(fixtureFormat)}):`,
           [
-            ...ownedMatching.map((t) => ({
-              text: t.name,
-              onPress: () => send(t.id),
+            ...eligibleTeams.map((t) => ({
+              text: `${t.name} (${t.player_count} players)`,
+              onPress: () => void send(t),
             })),
             { text: 'Cancel', style: 'cancel' },
           ],
@@ -346,7 +419,7 @@ export default function NearbyScreen(): React.ReactNode {
 
   const onJoinPress = async (item: Match): Promise<void> => {
     if (isDemoMatch(item.id)) {
-      Alert.alert('Sample match', 'This is placeholder data for the demo and cannot be joined.');
+      Alert.alert('Sample game', 'This is placeholder data for the demo and cannot be joined.');
       return;
     }
     if (joiningId) return;
@@ -369,7 +442,7 @@ export default function NearbyScreen(): React.ReactNode {
 
   // Which non-list state (if any) to show under the header. When null, the list
   // of match cards renders instead.
-  const busy = locating || (coords != null && nearby.isLoading);
+  const busy = locating || nearby.isLoading;
   const showCards = !busy && !nearby.isError && list.length > 0;
   const data = showCards ? list : [];
 
@@ -427,7 +500,7 @@ export default function NearbyScreen(): React.ReactNode {
             {filled}/{total} Players
           </AppText>
           <AppText variant="caption" color={isFull ? M.muted : M.green}>
-            {isFull ? 'MATCH FULL' : `${spotsLeft} ${spotsLeft === 1 ? 'spot' : 'spots'} left`}
+            {isFull ? 'GAME FULL' : `${spotsLeft} ${spotsLeft === 1 ? 'spot' : 'spots'} left`}
           </AppText>
         </View>
         <View style={styles.progressTrack}>
@@ -444,11 +517,11 @@ export default function NearbyScreen(): React.ReactNode {
                 ? 'Joining…'
                 : 'Requesting…'
               : alreadyIn
-                ? "You're already in this match"
+                ? "You're already in this game"
                 : isFull && item.status === 'open'
-                  ? 'Match full'
+                  ? 'Game full'
                   : isOpen
-                    ? 'Join Match'
+                    ? 'Join Game'
                     : 'View'}
           </AppText>
         </ScalePressable>
@@ -456,59 +529,101 @@ export default function NearbyScreen(): React.ReactNode {
     );
   };
 
+  const avatarUrl = useAuthStore((st) => st.profile?.avatar_url ?? null);
+  const pendingCount = (usePendingActions().data ?? []).length;
+
   // Static top-of-screen content. Lives inside the list header so it scrolls
   // with the cards and can never overlap them (single scroll container).
   const ListHeader = (
     <View>
       {/* Brand row */}
       <View style={styles.header}>
-        <AppLogo width={92} />
+        <AppLogo variant="icon" width={48} style={styles.logo} />
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <AppText variant="title" color={M.text} style={styles.title} numberOfLines={1}>
+            Find a Match
+          </AppText>
+          <AppText variant="caption" color={M.muted} numberOfLines={1} style={{ fontSize: 13 }}>
+            {sport === null ? 'Play • Connect • Compete' : `Showing ${sportLabel(sport)} only`}
+          </AppText>
+        </View>
+        <Pressable
+          onPress={() => router.push('/(tabs)/activity')}
+          style={styles.headerBtn}
+          accessibilityRole="button"
+          accessibilityLabel={
+            pendingCount > 0 ? `Notifications, ${pendingCount} needing attention` : 'Notifications'
+          }
+        >
+          <IconBell color={M.text} size={20} />
+          {pendingCount > 0 ? <View style={styles.bellDot} /> : null}
+        </Pressable>
+        <Pressable
+          onPress={() => router.push('/(tabs)/profile')}
+          style={styles.avatarBtn}
+          accessibilityRole="button"
+          accessibilityLabel="View profile"
+        >
+          {avatarUrl ? (
+            <Image source={{ uri: avatarUrl }} style={styles.avatarImg} />
+          ) : (
+            <IconUser color={M.green} size={22} />
+          )}
+        </Pressable>
       </View>
 
-      <View style={styles.intro}>
-        <AppText variant="title" color={M.text} style={{ fontSize: 26 }}>
-          Matches near you
-        </AppText>
-        <AppText variant="caption" color={M.muted}>
-          {sport === null
-            ? 'Showing all sports — tap a sport to filter'
-            : `Showing ${sportLabel(sport)} only`}
-        </AppText>
-      </View>
-
-      {/* Sport image cards */}
+      {/*
+        Sport picker: one segmented control. Tapping the active sport clears the
+        filter, so "all sports" needs no third segment.
+      */}
       <View style={styles.sportRow}>
         {SPORT_CARDS.map(({ value, label }) => {
           const on = sport === value;
+          const Icon = value === 'box_cricket' ? IconCricket : IconBadminton;
           return (
             <Pressable
               key={value}
-              style={styles.sportCardWrap}
+              style={[styles.sportSeg, on ? styles.sportSegOn : null]}
               onPress={() => setSport(on ? null : value)}
               accessibilityRole="button"
               accessibilityState={{ selected: on }}
+              accessibilityLabel={on ? `${label}, selected. Tap to show all sports` : `Show ${label} only`}
             >
-              <MotiView
-                animate={{ scale: on ? 1 : 0.97, borderColor: on ? M.green : M.border }}
-                transition={{ type: 'spring', damping: 14, stiffness: 180 }}
-                style={[styles.sportCard, on ? styles.sportCardOn : null]}
+              <Icon color={on ? M.limeInk : M.text} size={20} />
+              <AppText variant="label" color={on ? M.limeInk : M.text} numberOfLines={1}>
+                {label}
+              </AppText>
+            </Pressable>
+          );
+        })}
+      </View>
+
+      {/* Search distance */}
+      <AppText variant="caption" color={M.faint} style={styles.radiusLabel}>
+        SEARCH DISTANCE
+      </AppText>
+      <View style={styles.radiusRow}>
+        {SEARCH_RADII_M.map((r) => {
+          const on = r === radiusM;
+          return (
+            <Pressable
+              key={r}
+              onPress={() => setRadiusM(r)}
+              style={[
+                styles.radiusChip,
+                { borderColor: on ? M.green : M.border, backgroundColor: on ? M.chip : M.card },
+              ]}
+              accessibilityRole="button"
+              accessibilityState={{ selected: on }}
+              accessibilityLabel={`Search within ${formatRadius(r)}`}
+            >
+              <AppText
+                variant="caption"
+                color={on ? M.green : M.muted}
+                style={{ fontSize: 13, fontWeight: on ? '700' : '500' }}
               >
-                <ImageBackground
-                  source={SPORT_IMAGE[value]}
-                  style={styles.sportImage}
-                  imageStyle={{ borderRadius: 18 }}
-                >
-                  <View style={styles.sportShade} />
-                  <View style={styles.sportTextWrap}>
-                    <AppText variant="label" color={M.text} style={styles.sportLabel}>
-                      {label}
-                    </AppText>
-                    <AppText variant="caption" color={M.muted}>
-                      Find matches
-                    </AppText>
-                  </View>
-                </ImageBackground>
-              </MotiView>
+                {formatRadius(r)}
+              </AppText>
             </Pressable>
           );
         })}
@@ -516,6 +631,7 @@ export default function NearbyScreen(): React.ReactNode {
 
       {/* Actions */}
       <View style={styles.actions}>
+        <View style={styles.actionCell}>
         <ScalePressable onPress={goCreate} style={styles.primaryBtn}>
           <IconPlus color={M.limeInk} size={18} />
           <AppText
@@ -524,9 +640,11 @@ export default function NearbyScreen(): React.ReactNode {
             numberOfLines={1}
             style={{ fontSize: 15, lineHeight: 18, marginLeft: 6, flexShrink: 1 }}
           >
-            Create Match
+            Create Game
           </AppText>
         </ScalePressable>
+        </View>
+        <View style={styles.actionCell}>
         <ScalePressable onPress={() => router.push('/match/join')} style={styles.secondaryBtn}>
           <IconSend color={M.text} size={18} />
           <AppText
@@ -538,7 +656,32 @@ export default function NearbyScreen(): React.ReactNode {
             Join with code
           </AppText>
         </ScalePressable>
+        </View>
       </View>
+
+      {/* Live Match Radar: the way into squad-vs-squad matchmaking. */}
+      {!activeChallenge ? (
+        <Pressable
+          onPress={() => router.push('/match/create/searching')}
+          style={styles.radarCard}
+          accessibilityRole="button"
+          accessibilityLabel="Live match radar. Find nearby squads."
+        >
+          <HillsArt variant="plain" width={150} />
+          <IconTile size={52} color={M.green}>
+            <IconTarget color={M.limeInk} size={28} />
+          </IconTile>
+          <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+            <AppText variant="label" color={M.text} style={styles.radarTitle} numberOfLines={1}>
+              Live Match Radar
+            </AppText>
+            <AppText variant="caption" color={M.muted} numberOfLines={1} style={{ fontSize: 13 }}>
+              Find nearby squads in real-time
+            </AppText>
+          </View>
+          <IconChevron color={M.green} size={18} />
+        </Pressable>
+      ) : null}
 
       {/* Live Radar banner for active team challenge */}
       {activeChallenge ? (
@@ -571,14 +714,17 @@ export default function NearbyScreen(): React.ReactNode {
         </Pressable>
       ) : null}
 
-      {/* Open Team Challenges (Looking for Opponents) */}
+      {/*
+        Open Team Challenges.
+        Unblocked so fixtures are visible and discoverable to all players across all formats.
+      */}
       {openChallenges.data && openChallenges.data.length > 0 ? (
         <View style={styles.challengeSection}>
           <View style={styles.sectionHeaderRow}>
             <View style={styles.challengeSectionPill}>
               <View style={styles.challengeSectionDot} />
               <AppText variant="caption" color={M.limeInk} style={{ fontWeight: '800', fontSize: 11 }}>
-                TEAMS LOOKING FOR OPPONENTS ({openChallenges.data.length})
+                {`TEAMS LOOKING FOR OPPONENTS (${openChallenges.data.length})`}
               </AppText>
             </View>
           </View>
@@ -593,7 +739,16 @@ export default function NearbyScreen(): React.ReactNode {
               const isApplied = item.applied_status === 'interested';
               const isBusy = challengingId === item.challenge_id;
               return (
-                <View style={styles.challengeCard}>
+                <Pressable
+                  onPress={() => setSelectedOffer(item)}
+                  style={({ pressed }) => [
+                    styles.challengeCard,
+                    { width: challengeCardWidth },
+                    { transform: [{ scale: pressed ? 0.99 : 1 }] },
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${item.from_team_name} match offer. Tap to view details and stats.`}
+                >
                   <View style={styles.challengeCardTop}>
                     <View style={styles.challengeTeamLogo}>
                       <AppText variant="heading" color={M.limeInk} style={{ fontSize: 16 }}>
@@ -605,7 +760,8 @@ export default function NearbyScreen(): React.ReactNode {
                         {item.from_team_name}
                       </AppText>
                       <AppText variant="caption" color={M.muted}>
-                        {item.sport === 'box_cricket' ? '🏏 Cricket' : '🏸 Badminton'} · {item.total_slots} slots
+                        {item.sport === 'box_cricket' ? '🏏 Cricket' : '🏸 Badminton'} ·{' '}
+                        {formatLabel(Math.max(Math.floor(item.total_slots / 2), 1))}
                       </AppText>
                     </View>
                   </View>
@@ -627,7 +783,10 @@ export default function NearbyScreen(): React.ReactNode {
                   </View>
 
                   <Pressable
-                    onPress={() => onChallengeTeam(item)}
+                    onPress={(e) => {
+                      e.stopPropagation?.();
+                      onChallengeTeam(item);
+                    }}
                     disabled={isApplied || isBusy}
                     style={[
                       styles.challengeBtn,
@@ -647,33 +806,36 @@ export default function NearbyScreen(): React.ReactNode {
                       </AppText>
                     )}
                   </Pressable>
-                </View>
+                </Pressable>
               );
             }}
           />
         </View>
       ) : null}
 
+      {!coords ? (
+        <View style={styles.locationBanner}>
+          <IconPin color={M.green} size={14} />
+          <AppText variant="caption" color={M.muted} style={{ flex: 1 }}>
+            Showing all games · Turn on location to sort by distance
+          </AppText>
+        </View>
+      ) : null}
+
       {/* Section heading — only when cards are shown below */}
       {showCards && data.length > 0 ? (
         <AppText variant="label" color={M.text} style={styles.listHeading}>
-          Nearby matches
+          {coords ? 'Nearby games' : 'All games'}
         </AppText>
       ) : null}
 
       {/* Non-list states render here, still under the buttons */}
       {busy ? (
         <SkeletonCards />
-      ) : !coords ? (
-        <View style={styles.notice}>
-          <AppText color={M.muted} center>
-            Turn on location to see matches near you. You can still create or join with a code.
-          </AppText>
-        </View>
       ) : nearby.isError ? (
         <View style={styles.notice}>
           <AppText color={M.muted} center>
-            Could not load nearby matches.
+            Could not load games.
           </AppText>
           <ScalePressable onPress={() => void nearby.refetch()} style={styles.retryBtn}>
             <AppText variant="label" color={M.text}>
@@ -682,7 +844,7 @@ export default function NearbyScreen(): React.ReactNode {
           </ScalePressable>
         </View>
       ) : list.length === 0 ? (
-        <EmptyState onCreate={goCreate} />
+        <EmptyState onCreate={goCreate} radiusM={radiusM} />
       ) : null}
     </View>
   );
@@ -695,14 +857,33 @@ export default function NearbyScreen(): React.ReactNode {
         keyExtractor={(m) => m.id}
         renderItem={renderItem}
         ListHeaderComponent={ListHeader}
-        onRefresh={coords ? () => void nearby.refetch() : undefined}
+        onRefresh={() => void nearby.refetch()}
         refreshing={nearby.isRefetching}
         showsVerticalScrollIndicator={false}
         removeClippedSubviews
         initialNumToRender={6}
         windowSize={7}
         ItemSeparatorComponent={() => <View style={{ height: S.md }} />}
-        contentContainerStyle={styles.listContent}
+        contentContainerStyle={[styles.listContent, { paddingBottom: tabContentPadding }]}
+      />
+
+      <MatchOfferDetailModal
+        visible={selectedOffer !== null}
+        onClose={() => setSelectedOffer(null)}
+        offer={selectedOffer}
+        onSendRequest={(item) => {
+          setSelectedOffer(null);
+          onChallengeTeam(item);
+        }}
+        requesting={challengingId === selectedOffer?.challenge_id && applyToChallenge.isPending}
+        isMine={(myTeams.data ?? []).some((t) => t.id === selectedOffer?.from_team_id && t.i_am_owner)}
+        onViewRadar={(challengeId) => {
+          setSelectedOffer(null);
+          router.push({
+            pathname: '/match/create/searching',
+            params: { challengeId },
+          });
+        }}
       />
     </SafeAreaView>
   );
@@ -712,46 +893,94 @@ const makeStyles = (M: MockPalette) =>
   StyleSheet.create({
   safe: { flex: 1, backgroundColor: M.bg },
   list: { flex: 1 },
-  listContent: { paddingHorizontal: S.lg, paddingTop: S.sm, paddingBottom: S.xl },
+  listContent: { paddingHorizontal: S.md, paddingTop: S.sm, paddingBottom: S.xl },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingBottom: S.xs,
+    gap: S.sm,
+    paddingBottom: S.md,
   },
-  intro: { gap: 4, marginBottom: S.md },
-  sportRow: { flexDirection: 'row', gap: S.md, marginBottom: S.lg },
-  sportCardWrap: { flex: 1 },
-  sportCard: {
-    height: 128,
-    borderRadius: 20,
-    borderWidth: 2,
-    borderColor: M.border,
+  title: { fontSize: 22, lineHeight: 28 },
+  logo: { borderRadius: 12 },
+  headerBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: M.card,
+    borderWidth: 1,
+    borderColor: M.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bellDot: {
+    position: 'absolute',
+    top: 9,
+    right: 10,
+    width: 9,
+    height: 9,
+    borderRadius: 5,
+    backgroundColor: M.danger,
+    borderWidth: 1.5,
+    borderColor: M.card,
+  },
+  avatarBtn: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    borderWidth: 2,
+    borderColor: M.green,
+    backgroundColor: M.chip,
+    alignItems: 'center',
+    justifyContent: 'center',
     overflow: 'hidden',
   },
-  sportCardOn: {
-    shadowColor: M.green,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.55,
-    shadowRadius: 12,
-    elevation: 10,
+  avatarImg: { width: '100%', height: '100%' },
+  radiusLabel: { marginBottom: S.xs, letterSpacing: 0.8 },
+  radiusRow: { flexDirection: 'row', flexWrap: 'wrap', gap: S.sm, marginBottom: S.md },
+  radiusChip: {
+    minHeight: 38,
+    justifyContent: 'center',
+    paddingHorizontal: S.md,
+    borderRadius: R.pill,
+    borderWidth: 1.5,
   },
-  sportImage: { flex: 1, justifyContent: 'flex-end' },
-  sportShade: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.42)',
+  sportRow: {
+    flexDirection: 'row',
+    padding: 4,
+    marginBottom: S.md,
+    borderRadius: R.pill,
+    borderWidth: 1,
+    borderColor: M.border,
+    backgroundColor: M.card,
   },
-  sportTextWrap: { paddingHorizontal: S.md, paddingBottom: S.md },
-  sportLabel: { fontSize: 17, fontWeight: '700' },
-  actions: { flexDirection: 'row', gap: S.md, marginBottom: S.lg },
-  primaryBtn: {
+  sportSeg: {
     flex: 1,
+    flexDirection: 'row',
+    gap: S.sm,
+    minHeight: 46,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: R.pill,
+  },
+  sportSegOn: { backgroundColor: M.green },
+  radarCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: S.md,
+    marginBottom: S.md,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: M.border,
+    backgroundColor: M.chip,
+    overflow: 'hidden',
+  },
+  radarTitle: { fontSize: 16, fontFamily: 'SpaceGrotesk_700Bold', fontWeight: '700' },
+  actions: { flexDirection: 'row', gap: S.sm + 4, marginBottom: S.md },
+  actionCell: { flex: 1 },
+  primaryBtn: {
     minHeight: 52,
+    paddingHorizontal: S.md,
     borderRadius: 18,
     flexDirection: 'row',
     backgroundColor: M.green,
@@ -775,8 +1004,8 @@ const makeStyles = (M: MockPalette) =>
     justifyContent: 'center',
   },
   secondaryBtn: {
-    flex: 1,
     minHeight: 52,
+    paddingHorizontal: S.md,
     borderRadius: 18,
     flexDirection: 'row',
     borderWidth: 1.5,
@@ -786,7 +1015,33 @@ const makeStyles = (M: MockPalette) =>
     justifyContent: 'center',
   },
   listHeading: { fontSize: 16, marginBottom: S.sm },
+  locationBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: S.sm,
+    backgroundColor: M.cardHi,
+    borderRadius: R.md,
+    borderWidth: 1,
+    borderColor: M.border,
+    paddingHorizontal: S.md,
+    paddingVertical: S.sm + 2,
+    marginBottom: S.md,
+  },
   notice: { alignItems: 'center', gap: S.md, paddingVertical: S.xl },
+  /*
+    The format empty states. Bordered card rather than plain muted text: this is
+    the screen telling the user WHY the list is short, and it has to read as
+    information about the filter, not as a failed fetch.
+  */
+  formatEmpty: {
+    gap: S.sm,
+    padding: S.md,
+    borderRadius: R.lg,
+    borderWidth: 1,
+    borderColor: M.border,
+    backgroundColor: M.card,
+    alignItems: 'flex-start',
+  },
   retryBtn: {
     minHeight: 44,
     paddingHorizontal: S.lg,
@@ -949,7 +1204,7 @@ const makeStyles = (M: MockPalette) =>
     paddingVertical: 2,
   },
   challengeCard: {
-    width: 240,
+    // Width comes from railCardWidth() at the call site — see NearbyScreen.
     padding: S.md,
     borderRadius: 20,
     borderWidth: 1.5,

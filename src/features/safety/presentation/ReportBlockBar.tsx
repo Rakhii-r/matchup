@@ -60,7 +60,7 @@ export function ReportBlockBar({
   const confirmBlock = (): void => {
     Alert.alert(
       `Block this ${targetLabel}?`,
-      'You will no longer see each other in matches or availability.',
+      'You will no longer see each other in games or availability.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
