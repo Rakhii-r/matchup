@@ -1,3 +1,8 @@
+-- MOVED OUT OF migrations/ on 27 Oct 2026 and NEVER applied to production.
+-- It creates fake logins, players, teams and scored matches; on the live
+-- database real users would see them. Run it only against a demo/staging
+-- project. Play reviewers get a test phone number + OTP instead.
+
 -- ============================================================================
 -- Play Store Release Seed Migration: Real Hyderabad Box-Cricket Venues, Teams,
 -- Full Rosters, Scored Matches, and Active Open Match Discovery.

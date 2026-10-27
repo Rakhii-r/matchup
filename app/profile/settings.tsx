@@ -7,11 +7,12 @@
  * a superadmin, and Log Out.
  */
 import { useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Alert, Linking, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useRouter } from 'expo-router';
 
 import { useAuthStore } from '@core/auth/authStore';
+import { PRIVACY_POLICY_URL } from '@core/config/env';
 import { authRepository } from '@features/auth/data/authRepository';
 import { useTheme } from '@shared/theme/ThemeContext';
 import { R, S, useMock, type MockPalette } from '@shared/theme/mockTheme';
@@ -22,6 +23,7 @@ import {
   IconBell,
   IconCalendar,
   IconChevron,
+  IconDoc,
   IconEdit,
   IconLogout,
   IconMoon,
@@ -150,6 +152,26 @@ export default function SettingsScreen(): React.ReactNode {
             <IconChevron color={M.muted} size={18} />
           </Pressable>
         ))}
+
+        {/* Required by the App Store and expected by Play: the policy must be
+            reachable from inside the app, not only from the store listing. */}
+        <Pressable
+          style={styles.settingRow}
+          onPress={() => {
+            Linking.openURL(PRIVACY_POLICY_URL).catch(() =>
+              Alert.alert('Could not open the page', PRIVACY_POLICY_URL),
+            );
+          }}
+          accessibilityRole="link"
+        >
+          <View style={[styles.settingIcon, { backgroundColor: M.border }]}>
+            <IconDoc color={M.green} size={20} />
+          </View>
+          <AppText variant="label" color={M.text} style={{ flex: 1, fontSize: 16 }}>
+            Privacy Policy
+          </AppText>
+          <IconChevron color={M.muted} size={18} />
+        </Pressable>
 
         {isSuperadmin ? (
           <>

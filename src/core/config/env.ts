@@ -62,3 +62,12 @@ export const isDev = env.appEnv === 'development';
  * never see invented matches.
  */
 export const showDemoMatches = env.demoMatches && !isProd;
+
+/**
+ * Public legal pages (netlify-site/ outside this repo). Play Console and the
+ * App Store link to the same two URLs, so change them here and there together.
+ * LEGAL_SITE must match the deployed Netlify site before a release build.
+ */
+const LEGAL_SITE = 'https://sixfour24.netlify.app';
+export const PRIVACY_POLICY_URL = `${LEGAL_SITE}/privacy-policy.html`;
+export const DELETE_ACCOUNT_URL = `${LEGAL_SITE}/delete-account.html`;
