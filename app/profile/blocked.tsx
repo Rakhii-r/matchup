@@ -8,7 +8,8 @@
  * screen.
  */
 import { useMemo } from 'react';
-import { ActivityIndicator, Alert, FlatList, Image, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Image, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
+import { useRefreshAll } from '@shared/ui/useRefreshAll';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack } from 'expo-router';
 
@@ -20,6 +21,7 @@ import { IconUser } from '@shared/ui/icons';
 
 export default function BlockedPlayersScreen(): React.ReactNode {
   const M = useMock();
+  const { refreshing, onRefresh } = useRefreshAll();
   const styles = useMemo(() => makeStyles(M), [M]);
   const blocked = useBlockedUsers();
   const unblock = useUnblockUser();
@@ -86,6 +88,7 @@ export default function BlockedPlayersScreen(): React.ReactNode {
           keyExtractor={(p) => p.userId}
           renderItem={renderPerson}
           contentContainerStyle={styles.list}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={M.green} />}
           ListEmptyComponent={
             <AppText color={M.muted} center style={styles.empty}>
               You have not blocked anyone. Blocking someone hides them from your

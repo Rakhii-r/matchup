@@ -7,13 +7,12 @@
  * the right side. An animation that generated its own result would eventually
  * disagree with the database.
  *
- * Two real faces rather than one image flipped: the wrapper rotates on X with a
- * perspective, and each face is a separate Image. Which face is visible is
- * driven by the rotation angle itself, so it cannot desync from the spin —
- * `backfaceVisibility` is also set, but the parity check is what guarantees
- * correctness on devices where that property is unreliable.
+ * Two real faces rather than one image flipped: the wrapper squashes vertically
+ * by |cos(angle)| (a 2D flip, see `coinStyle`), and each face is a separate
+ * Image. Which face is visible is driven by the angle itself, so it cannot
+ * desync from the spin. At rest it is a plain Image with no transform.
  */
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AccessibilityInfo, Image, StyleSheet, View } from 'react-native';
 import Animated, {
   Easing,
@@ -27,8 +26,8 @@ import * as Haptics from 'expo-haptics';
 
 import type { MockPalette } from '@shared/theme/mockTheme';
 
-const HEADS = require('../../../../assets/images/head coin -64.jpg') as number;
-const TAILS = require('../../../../assets/images/tails coin- 64.jpg') as number;
+const HEADS = require('../../../../assets/images/coin-heads.png') as number;
+const TAILS = require('../../../../assets/images/coin-tails.png') as number;
 
 /** Full turns before it settles. Odd enough to read as a real flip, not a spin. */
 const TURNS = 5;
@@ -82,10 +81,31 @@ export function CoinFlip({
   // us the same value again.
   const playedFor = useRef<string | null>(null);
 
+  /*
+    Held in a ref, NOT an effect dependency. Callers pass an inline arrow, so
+    a dependency changed on every render: any re-render mid-flip (the "you won
+    the toss" popup, a refetch) re-ran the effect, which took the replay-guard
+    branch, snapped the coin to rest and cancelled the spin -- whose callback
+    then saw finished=false and never settled. The screen sat on "Flipping…".
+  */
+  const onSettledRef = useRef(onSettled);
+  useEffect(() => {
+    onSettledRef.current = onSettled;
+  }, [onSettled]);
+
+  /*
+    True only while the 3D spin is running. At rest the coin is a plain Image
+    with no transform at all: rotateX + perspective on Android rendered an
+    empty card on real devices, and a coin that is not moving has no use for
+    3D. Only the spin itself is exposed to that risk.
+  */
+  const [spinning, setSpinning] = useState(false);
+
   const settle = useCallback((): void => {
     tap(Haptics.ImpactFeedbackStyle.Medium);
-    onSettled?.();
-  }, [onSettled]);
+    setSpinning(false);
+    onSettledRef.current?.();
+  }, []);
 
   useEffect(() => {
     if (outcome === null) return;
@@ -117,14 +137,17 @@ export function CoinFlip({
 
       tap(Haptics.ImpactFeedbackStyle.Light);
 
+      setSpinning(true);
       spin.value = 0;
       spin.value = withTiming(
         TURNS * 360 + restAngle,
         // Decelerating: the last couple of turns are visibly slower, which is
         // what makes it read as a coin losing momentum rather than a spinner.
         { duration: SPIN_MS, easing: Easing.bezier(0.12, 0.62, 0.12, 1) },
-        (finished) => {
-          if (finished) runOnJS(settle)();
+        // Settle even when interrupted: the result is already decided on the
+        // server, and withholding it behind "Flipping…" helps no one.
+        () => {
+          runOnJS(settle)();
         },
       );
 
@@ -147,14 +170,15 @@ export function CoinFlip({
     };
   }, [outcome, animate, flipKey, settle, size, spin, lift, scale]);
 
-  const coinStyle = useAnimatedStyle(() => ({
-    transform: [
-      { perspective: 900 },
-      { translateY: lift.value },
-      { scale: scale.value },
-      { rotateX: `${spin.value}deg` },
-    ],
-  }));
+  // A 2D flip: the coin's height follows |cos(angle)|, which is what a coin
+  // turning end over end looks like from the front. No rotateX/perspective --
+  // Android's 3D path is what left the card empty on real devices.
+  const coinStyle = useAnimatedStyle(() => {
+    const squash = Math.max(Math.abs(Math.cos((spin.value * Math.PI) / 180)), 0.04);
+    return {
+      transform: [{ translateY: lift.value }, { scale: scale.value }, { scaleY: squash }],
+    };
+  });
 
   // Face visibility derived from the angle, so it can never disagree with the
   // spin. Heads owns 270°–90°, tails owns 90°–270°.
@@ -178,6 +202,19 @@ export function CoinFlip({
 
   const face = [styles.face, { width: size, height: size, borderRadius: size / 2 }];
 
+  if (!spinning) {
+    return (
+      <View style={[styles.stage, { height: size * 1.9 }]} accessibilityRole="image">
+        <Image
+          source={outcome === 'tails' ? TAILS : HEADS}
+          style={{ width: size, height: size, borderRadius: size / 2 }}
+          resizeMode="cover"
+          accessibilityLabel={outcome === 'tails' ? 'Coin showing tails' : 'Coin showing heads'}
+        />
+      </View>
+    );
+  }
+
   return (
     <View style={[styles.stage, { height: size * 1.9 }]} accessibilityRole="image">
       <Animated.View
@@ -191,7 +228,7 @@ export function CoinFlip({
         <Animated.Image source={HEADS} style={[...face, headsStyle]} resizeMode="cover" />
         <Animated.Image
           source={TAILS}
-          style={[...face, styles.back, tailsStyle]}
+          style={[...face, tailsStyle]}
           resizeMode="cover"
         />
       </Animated.View>
@@ -217,7 +254,9 @@ export function CoinResting({ size = 176 }: { size?: number }): React.ReactNode 
 
 const styles = StyleSheet.create({
   stage: { alignItems: 'center', justifyContent: 'center' },
-  face: { position: 'absolute', backfaceVisibility: 'hidden' },
-  back: { transform: [{ rotateX: '180deg' }] },
+  // No `backfaceVisibility` and no rotateX(180) back face: Android culled the
+  // tails face at every angle, so a TAILS result showed an empty card. The
+  // opacity parity above picks the visible face instead.
+  face: { position: 'absolute' },
   shadow: { position: 'absolute', height: 10, borderRadius: 999 },
 });

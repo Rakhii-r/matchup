@@ -133,7 +133,10 @@ export function TimeSlotGrid({
             >
               <AppText
                 variant="caption"
-                color={active ? M.limeInk : M.muted}
+                // M.green, not M.limeInk: limeInk is the ink for a GREEN fill
+                // and is white in the light palette, which on cardHi
+                // (#F1F5F3) made the selected chip's label vanish.
+                color={active ? M.green : M.muted}
                 style={{ fontWeight: active ? '700' : '500', fontSize: 11 }}
               >
                 {tab.label}

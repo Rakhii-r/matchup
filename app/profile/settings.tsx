@@ -6,7 +6,7 @@
  * do are unchanged: appearance, the four account screens, the admin portal for
  * a superadmin, and Log Out.
  */
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useRouter } from 'expo-router';
@@ -64,6 +64,43 @@ export default function SettingsScreen(): React.ReactNode {
   const { isDark, setScheme } = useTheme();
   const router = useRouter();
   const isSuperadmin = useAuthStore((s) => s.isSuperadmin);
+  const userId = useAuthStore((s) => s.session?.user.id);
+  const [deleting, setDeleting] = useState(false);
+
+  // Two confirmations: this cannot be undone, and one stray tap must not do it.
+  const confirmDelete = (): void => {
+    Alert.alert(
+      'Delete your account?',
+      'Your profile, photo, phone number login, availability, bookings, blocks and messages are deleted. ' +
+        'Matches you played stay in other players’ history as "Deleted player". ' +
+        'Squads you own pass to another member. This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Continue',
+          style: 'destructive',
+          onPress: () =>
+            Alert.alert('Are you sure?', 'Your account will be permanently deleted.', [
+              { text: 'Keep my account', style: 'cancel' },
+              { text: 'Delete forever', style: 'destructive', onPress: () => void deleteAccount() },
+            ]),
+        },
+      ],
+    );
+  };
+
+  const deleteAccount = async (): Promise<void> => {
+    if (!userId || deleting) return;
+    setDeleting(true);
+    try {
+      await authRepository.deleteAccount(userId);
+    } catch {
+      setDeleting(false);
+      Alert.alert('Could not delete your account', 'Check your connection and try again.');
+      return;
+    }
+    router.replace('/(auth)/login');
+  };
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
@@ -165,6 +202,18 @@ export default function SettingsScreen(): React.ReactNode {
             Log Out
           </AppText>
         </Pressable>
+
+        <Pressable
+          style={styles.deleteAccount}
+          onPress={confirmDelete}
+          disabled={deleting}
+          accessibilityRole="button"
+          accessibilityHint="Permanently deletes your account after two confirmations"
+        >
+          <AppText variant="caption" color={M.danger} style={{ fontWeight: '700' }}>
+            {deleting ? 'Deleting account…' : 'Delete account'}
+          </AppText>
+        </Pressable>
       </ScrollView>
     </SafeAreaView>
   );
@@ -203,6 +252,13 @@ const makeStyles = (M: MockPalette) =>
       borderRadius: R.md,
       paddingVertical: S.md + 2,
       marginTop: S.lg,
+      minHeight: 44,
+    },
+    deleteAccount: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: S.md,
+      marginTop: S.md,
       minHeight: 44,
     },
   });

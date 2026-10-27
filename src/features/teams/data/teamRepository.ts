@@ -104,11 +104,16 @@ export const teamRepository = {
     if (error) throw toAppError(error);
   },
 
-  /** Teams the user belongs to. RLS already limits rows to their memberships. */
+  /**
+   * Teams the user belongs to. RLS already limits rows to their memberships.
+   * The Side A / Side B shells an open match gets at the toss are excluded:
+   * the organiser owns both, but they are not squads anyone built.
+   */
   async listMine(): Promise<Team[]> {
     const { data, error } = await supabase
       .from('teams')
       .select('*')
+      .eq('is_match_side', false)
       .order('created_at', { ascending: false })
       .limit(50);
     if (error) throw toAppError(error);

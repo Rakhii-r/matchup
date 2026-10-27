@@ -556,6 +556,8 @@ export interface Database {
            * cannot rank it and `list_open_challenges_nearby` shows it nothing.
            */
           target_size: number | null;
+          /** A Side A / Side B team perform_toss made for an open match. Hidden from My Teams. */
+          is_match_side: boolean;
           created_at: string;
         };
         Insert: {
@@ -565,6 +567,7 @@ export interface Database {
           owner_id: string;
           invite_code: string;
           target_size?: number | null;
+          is_match_side?: boolean;
           description?: string | null;
           logo_url?: string | null;
           home_ground?: string | null;
@@ -1395,6 +1398,10 @@ export interface Database {
       cleanup_my_open_fixtures: {
         Args: Record<string, never>;
         Returns: number;
+      };
+      delete_my_account: {
+        Args: Record<string, never>;
+        Returns: undefined;
       };
       apply_to_open_challenge: {
         Args: { in_challenge_id: string; in_team_id: string };

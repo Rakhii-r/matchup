@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Switch, View } from 'react-native';
+import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Switch, View } from 'react-native';
+import { useRefreshAll } from '@shared/ui/useRefreshAll';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAuthStore } from '@core/auth/authStore';
@@ -29,6 +30,7 @@ function initials(name: string): string {
 
 export default function AvailableScreen(): React.ReactNode {
   const M = useMock();
+  const { refreshing, onRefresh } = useRefreshAll();
   // Reserve the tab bar plus the device's bottom inset, or the last card in
   // this list sits underneath the bar.
   const tabContentPadding = useTabContentPadding();
@@ -69,7 +71,11 @@ export default function AvailableScreen(): React.ReactNode {
         <AppLogo variant="icon" width={48} style={{ borderRadius: 12 }} />
       </View>
 
-      <ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: tabContentPadding }]} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={[styles.scroll, { paddingBottom: tabContentPadding }]}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={M.green} />}
+      >
         {/* Hero + toggle */}
         <View style={styles.hero}>
           <View style={styles.heroTop}>

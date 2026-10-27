@@ -21,6 +21,7 @@
 import { useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Image, Pressable, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
+import { LinearGradient } from 'expo-linear-gradient';
 import { MotiView } from 'moti';
 
 import { CoinFlip, CoinResting } from '@features/matches/presentation/CoinFlip';
@@ -40,20 +41,34 @@ import {
   sportUsesOvers,
   tossDecisionLabel,
   tossDecisionVerb,
+  tossPurposeLabel,
   type TossCall,
 } from '@features/matches/domain/tossSchema';
 import { radius, spacing, type AppColors } from '@shared/theme';
 import { useTheme } from '@shared/theme/ThemeContext';
 import { AppText } from '@shared/ui/AppText';
-import { IconBolt, IconCheck, IconClock, IconCoin, IconCricketBall } from '@shared/ui/icons';
+import {
+  IconArrowRight,
+  IconBadminton,
+  IconBolt,
+  IconCheck,
+  IconClock,
+  IconClose,
+  IconCoin,
+  IconCricket,
+  IconCricketBall,
+  IconTarget,
+  IconTrophy,
+  IconUndo,
+} from '@shared/ui/icons';
 import { Button } from '@shared/ui/Button';
-import { IconTile, StadiumBackdrop } from '@shared/ui/decor';
+import { IconTile } from '@shared/ui/decor';
 
 // The same two faces CoinFlip lands on, reused small for the call buttons.
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const HEADS = require('../../../../assets/images/head coin -64.jpg') as number;
+const HEADS = require('../../../../assets/images/coin-heads.png') as number;
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const TAILS = require('../../../../assets/images/tails coin- 64.jpg') as number;
+const TAILS = require('../../../../assets/images/coin-tails.png') as number;
 
 const CALLS: { key: TossCall; label: string; hint: string; image: number }[] = [
   { key: 'heads', label: 'HEADS', hint: 'Call Heads', image: HEADS },
@@ -174,147 +189,211 @@ export function TossPanel({ matchId, onProceed }: TossPanelProps): React.ReactNo
   }
 
   const data = toss.data;
+  const decisionIcons =
+    sport === 'badminton'
+      ? {
+          bat: <IconBadminton color={colors.primary} size={26} />,
+          bowl: <IconTarget color={colors.primary} size={26} />,
+        }
+      : {
+          bat: <IconCricket color={colors.primary} size={26} />,
+          bowl: <IconCricketBall size={26} />,
+        };
+  const winnerName = sideName(data?.winner_team_name) ?? 'The winning side';
+  const callerName = sideName(data?.calling_team_name) ?? 'Organiser';
+  const callWon = data ? data.called_face === data.outcome : false;
+
+  /** "Called HEADS · Landed TAILS", with a tick or cross for whether the call came up. */
+  const callSummary = data ? (
+    <View style={styles.summaryPill}>
+      <AppText variant="caption" muted>
+        {callerName} called{' '}
+        <AppText variant="caption" color={colors.text} style={styles.strong}>
+          {(data.called_face || 'heads').toUpperCase()}
+        </AppText>
+        {'  ·  '}Landed{' '}
+        <AppText variant="caption" color={colors.text} style={styles.strong}>
+          {data.outcome.toUpperCase()}
+        </AppText>
+      </AppText>
+      <View
+        style={[
+          styles.summaryDot,
+          { backgroundColor: callWon ? colors.primary : colors.textMuted },
+        ]}
+      >
+        {callWon ? (
+          <IconCheck color={colors.textInverse} size={10} strokeWidth={3.5} />
+        ) : (
+          <IconClose color={colors.textInverse} size={10} strokeWidth={3.5} />
+        )}
+      </View>
+    </View>
+  ) : null;
+
+  /*
+    A decided toss always wins over "calling again". The build testers had
+    left Bat/Bowl tappable under the re-call screen; once a decision landed the
+    screen stayed on "Flip the coin", and every tap after that was refused
+    with TOSS_ALREADY_DECIDED -- the "coin stops flipping" report. Deriving
+    this means no path (a tap, a poll, another device) can strand it there.
+  */
+  const recallOpen = recalling && !data?.decision;
 
   return (
     <>
       {/* ---------------- State 1: No toss yet, or calling again ---------------- */}
-      {!data || recalling ? (
+      {!data || recallOpen ? (
         <View style={[styles.card, styles.cardClip]}>
-          {/* Pale stadium wash behind the coin; it never takes a tap. */}
-          <View pointerEvents="none" style={[styles.heroWash, { backgroundColor: M.chip }]}>
-            <StadiumBackdrop height={150} net={false} />
-          </View>
-          <CoinResting />
-          <AppText variant="heading" center style={styles.title}>
-            Time for the Toss
-          </AppText>
-          <AppText variant="body" muted center style={{ fontSize: 14 }}>
-            Select your call (Heads or Tails). The coin is flipped randomly on the server.
-          </AppText>
-
-          {/* Captain's Heads/Tails Call Selection */}
-          {isOrganiser ? (
-            <View style={styles.callSection}>
-              <View style={styles.sectionHead}>
-                <IconTile size={30}>
-                  <IconCoin color={colors.primary} size={16} />
-                </IconTile>
-                <AppText variant="label" style={styles.sectionTitle}>
-                  Choose your call
-                </AppText>
-              </View>
-              <View style={styles.callRow}>
-                {CALLS.map((c) => {
-                  const on = selectedCall === c.key;
-                  return (
-                    <Pressable
-                      key={c.key}
-                      onPress={() => setSelectedCall(c.key)}
-                      style={[
-                        styles.callOption,
-                        on ? [styles.callOptionSelected, { backgroundColor: M.chip }] : null,
-                      ]}
-                      accessibilityRole="radio"
-                      accessibilityState={{ selected: on }}
-                      accessibilityLabel={c.hint}
-                    >
-                      <Image source={c.image} style={styles.callCoin} />
-                      <AppText
-                        variant="label"
-                        color={on ? colors.primary : colors.text}
-                        style={styles.callLabel}
-                      >
-                        {c.label}
-                      </AppText>
-                      <AppText variant="caption" muted>
-                        {c.hint}
-                      </AppText>
-                      {on ? (
-                        <View style={styles.checkBadge}>
-                          <IconCheck color={colors.textInverse} size={13} strokeWidth={3} />
-                        </View>
-                      ) : null}
-                    </Pressable>
-                  );
-                })}
-              </View>
+          <LinearGradient
+            colors={[colors.primary, colors.primaryDark]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.hero}
+          >
+            <View style={styles.heroBadge}>
+              <IconCoin color={colors.onPhoto} size={14} />
+              <AppText variant="caption" color={colors.onPhoto} style={styles.strong}>
+                {recallOpen ? 'RE-TOSS' : 'TOSS'}
+              </AppText>
             </View>
-          ) : null}
+            <CoinResting size={104} />
+            <AppText variant="heading" color={colors.onPhoto} center style={styles.heroTitle}>
+              {recallOpen ? 'Call it again' : 'Time for the toss'}
+            </AppText>
+            <AppText variant="caption" color={colors.onPhoto} center style={styles.heroSub}>
+              {tossPurposeLabel(sport)} The coin is flipped fairly on the server.
+            </AppText>
+          </LinearGradient>
 
-          {/* Overs selection for box cricket */}
-          {showOversPicker ? (
-            <>
-              <View style={styles.sectionHead}>
-                <IconTile size={30} color={colors.primary}>
-                  <IconClock color={colors.textInverse} size={16} />
-                </IconTile>
-                <AppText variant="label" style={styles.sectionTitle}>
-                  Overs per innings
-                </AppText>
-              </View>
-              <View style={styles.oversGrid}>
-                {OVERS_OPTIONS.map((n) => {
-                  const on = n === overs;
-                  return (
-                    <View key={n} style={styles.oversCell}>
+          <View style={styles.body}>
+            {isOrganiser ? (
+              <View style={styles.section}>
+                <StepLabel n={1} text="Make the call" styles={styles} />
+                <View style={styles.callRow}>
+                  {CALLS.map((c) => {
+                    const on = selectedCall === c.key;
+                    return (
                       <Pressable
-                        onPress={() => setOvers(n)}
-                        style={[styles.oversBtn, on ? styles.oversBtnOn : null]}
+                        key={c.key}
+                        onPress={() => setSelectedCall(c.key)}
+                        style={[
+                          styles.callOption,
+                          on ? [styles.callOptionOn, { backgroundColor: M.chip }] : null,
+                        ]}
                         accessibilityRole="radio"
                         accessibilityState={{ selected: on }}
+                        accessibilityLabel={c.hint}
+                      >
+                        <Image
+                          source={c.image}
+                          style={[styles.callCoin, on ? null : styles.callCoinOff]}
+                        />
+                        <AppText
+                          variant="label"
+                          color={on ? colors.primary : colors.text}
+                          style={styles.callLabel}
+                        >
+                          {c.label}
+                        </AppText>
+                        <View style={[styles.radio, on ? styles.radioOn : null]}>
+                          {on ? (
+                            <IconCheck color={colors.textInverse} size={12} strokeWidth={3} />
+                          ) : null}
+                        </View>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </View>
+            ) : null}
+
+            {showOversPicker ? (
+              <View style={styles.section}>
+                <StepLabel n={isOrganiser ? 2 : 1} text="Overs per innings" styles={styles} />
+                <View style={styles.oversRow}>
+                  {OVERS_OPTIONS.map((n) => {
+                    const on = n === overs;
+                    return (
+                      <Pressable
+                        key={n}
+                        onPress={() => setOvers(n)}
+                        disabled={!isOrganiser}
+                        style={[styles.oversChip, on ? styles.oversChipOn : null]}
+                        accessibilityRole="radio"
+                        accessibilityState={{
+                          selected: on,
+                          disabled: !isOrganiser,
+                        }}
                         accessibilityLabel={`${n} overs per innings`}
                       >
-                        <AppText variant="label" color={on ? colors.textInverse : colors.primary}>
-                          {n} Overs
+                        <AppText
+                          variant="label"
+                          color={on ? colors.textInverse : colors.text}
+                          style={styles.oversNum}
+                        >
+                          {n}
+                        </AppText>
+                        <AppText
+                          variant="caption"
+                          color={on ? colors.textInverse : colors.textMuted}
+                        >
+                          overs
                         </AppText>
                       </Pressable>
-                    </View>
-                  );
-                })}
+                    );
+                  })}
+                </View>
               </View>
-            </>
-          ) : usesOvers && lockedOvers !== null ? (
-            <AppText variant="caption" muted style={styles.sectionTop}>
-              {lockedOvers} overs per innings set for this match.
-            </AppText>
-          ) : null}
+            ) : usesOvers && lockedOvers !== null ? (
+              <View style={styles.infoRow}>
+                <IconClock color={colors.primary} size={16} />
+                <AppText variant="caption" muted>
+                  {lockedOvers} overs per innings, set for this match.
+                </AppText>
+              </View>
+            ) : null}
 
-          {isOrganiser ? (
-            <>
+            {isOrganiser ? (
               <View style={styles.cta}>
                 <Button
-                  label={`Flip the Coin (${selectedCall.toUpperCase()})`}
-                  icon={() => <IconBolt color="#F5B400" size={20} />}
+                  label="Flip the coin"
+                  icon={(c) => <IconBolt color={c} size={18} />}
                   loading={performToss.isPending || redoToss.isPending}
                   onPress={() => void onFlip()}
                 />
+                <AppText variant="caption" muted center>
+                  Calling {selectedCall.toUpperCase()}
+                  {showOversPicker ? ` · ${overs} overs` : ''}
+                </AppText>
               </View>
-              <AppText variant="caption" muted center>
-                You are running this game, so the call and the flip are yours.
-              </AppText>
-            </>
-          ) : (
-            /*
-              Read-only. perform_toss would refuse this person with
-              NOT_THE_ORGANISER, so a live button would only buy them an error
-              they could not have avoided.
-            */
-            <AppText variant="caption" muted center style={styles.sectionTop}>
-              The game organiser makes the call and flips the coin. The result appears here as
-              soon as they do.
-            </AppText>
-          )}
+            ) : (
+              /*
+                Read-only. perform_toss would refuse this person with
+                NOT_THE_ORGANISER, so a live button would only buy them an error
+                they could not have avoided.
+              */
+              <View style={styles.infoRow}>
+                <ActivityIndicator color={colors.primary} size="small" />
+                <AppText variant="caption" muted style={styles.flex}>
+                  The organiser makes the call and flips the coin. The result appears here as soon
+                  as they do.
+                </AppText>
+              </View>
+            )}
+          </View>
         </View>
       ) : null}
 
       {/* ---------------- State 2: Flipped, awaiting the winner's choice ---------------- */}
-      {data && !data.decision ? (
-        <View style={styles.card}>
+      {data && !data.decision && !recallOpen ? (
+        <View style={[styles.card, styles.body]}>
           <CoinFlip
             outcome={data.outcome}
             animate={flippedHere}
             flipKey={data.created_at}
             onSettled={() => setLanded(true)}
+            size={140}
             M={M}
           />
 
@@ -323,223 +402,399 @@ export function TossPanel({ matchId, onProceed }: TossPanelProps): React.ReactNo
               from={{ opacity: 0, translateY: 8 }}
               animate={{ opacity: 1, translateY: 0 }}
               transition={{ type: 'spring', damping: 15 }}
-              style={{ gap: spacing.xs }}
+              style={styles.resultBlock}
             >
-              {/* Call vs Outcome explanation */}
-              <View style={styles.callSummaryBox}>
-                <AppText variant="caption" muted center>
-                  {data.calling_team_name ? data.calling_team_name : 'Calling captain'} called{' '}
-                  <AppText variant="caption" color={colors.primary} style={{ fontWeight: '800' }}>
-                    {(data.called_face || 'heads').toUpperCase()}
-                  </AppText>{' '}
-                  · Coin landed{' '}
-                  <AppText variant="caption" color={colors.primary} style={{ fontWeight: '800' }}>
-                    {data.outcome.toUpperCase()}
-                  </AppText>
-                </AppText>
-              </View>
-
-              <AppText variant="heading" center style={{ fontSize: 22 }}>
-                {data.i_am_winner ? '🎉 You won the toss!' : `🎉 ${data.winner_team_name} won the toss`}
+              {callSummary}
+              <AppText variant="heading" center style={styles.title}>
+                {data.i_am_winner ? 'You won the toss!' : `${winnerName} won the toss`}
               </AppText>
             </MotiView>
           ) : (
-            <AppText variant="caption" muted center>
+            <AppText variant="label" muted center>
               Flipping…
             </AppText>
           )}
 
-          {data.i_am_winner && (!flippedHere || landed) ? (
-            <View style={{ gap: spacing.sm, marginTop: spacing.sm }}>
-              <AppText variant="label" center style={{ fontSize: 16 }}>
-                What is your decision?
-              </AppText>
-              <View style={styles.decisionRow}>
-                <Pressable
-                  onPress={() => void onChoose('bat')}
-                  disabled={setDecision.isPending}
-                  style={[styles.decisionBtn, { backgroundColor: colors.primary }]}
-                  accessibilityRole="button"
-                >
-                  <AppText style={{ fontSize: 24 }}>🏏</AppText>
-                  <AppText variant="label" color={colors.textInverse} style={{ fontWeight: '800' }}>
-                    {tossDecisionLabel(sport, 'bat').toUpperCase()}
-                  </AppText>
-                </Pressable>
-
-                <Pressable
-                  onPress={() => void onChoose('bowl')}
-                  disabled={setDecision.isPending}
-                  style={[styles.decisionBtn, { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 }]}
-                  accessibilityRole="button"
-                >
-                  <IconCricketBall size={24} />
-                  <AppText variant="label" color={colors.text} style={{ fontWeight: '800' }}>
-                    {tossDecisionLabel(sport, 'bowl').toUpperCase()}
-                  </AppText>
-                </Pressable>
+          {!flippedHere || landed ? (
+            data.i_am_winner ? (
+              <View style={styles.section}>
+                <AppText variant="label" center style={styles.sectionTitle}>
+                  {sport === 'badminton' ? 'Serve or receive?' : 'Bat or bowl?'}
+                </AppText>
+                <View style={styles.decisionRow}>
+                  {(['bat', 'bowl'] as const).map((d) => (
+                    <Pressable
+                      key={d}
+                      onPress={() => void onChoose(d)}
+                      disabled={setDecision.isPending}
+                      style={({ pressed }) => [
+                        styles.decisionBtn,
+                        pressed
+                          ? {
+                              backgroundColor: M.chip,
+                              borderColor: colors.primary,
+                            }
+                          : null,
+                        setDecision.isPending ? styles.dim : null,
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityLabel={tossDecisionLabel(sport, d)}
+                    >
+                      <IconTile size={52}>{decisionIcons[d]}</IconTile>
+                      <AppText variant="label" style={styles.decisionLabel}>
+                        {tossDecisionLabel(sport, d)}
+                      </AppText>
+                    </Pressable>
+                  ))}
+                </View>
+                {setDecision.isPending ? <ActivityIndicator color={colors.primary} /> : null}
               </View>
-            </View>
-          ) : (
-            <View style={styles.waiting}>
-              <ActivityIndicator color={colors.primary} />
-              <AppText variant="caption" muted>
-                Waiting for {data.winner_team_name} captain to choose {sport === 'badminton' ? 'serve or receive' : 'bat or bowl'}.
-              </AppText>
-            </View>
-          )}
+            ) : (
+              <View style={styles.infoRow}>
+                <ActivityIndicator color={colors.primary} size="small" />
+                <AppText variant="caption" muted style={styles.flex}>
+                  Waiting for {winnerName} to choose{' '}
+                  {sport === 'badminton' ? 'serve or receive' : 'bat or bowl'}.
+                </AppText>
+              </View>
+            )
+          ) : null}
 
-          {isOrganiser && !data.decision && (!flippedHere || landed) ? (
-            <View style={styles.cta}>
-              <Button
-                label="Flip again"
-                variant="secondary"
-                loading={redoToss.isPending}
-                onPress={onFlipAgain}
-              />
-              <AppText variant="caption" muted center>
-                Replaces this result. Both captains are notified.
+          {isOrganiser && (!flippedHere || landed) ? (
+            <Pressable
+              onPress={onFlipAgain}
+              disabled={redoToss.isPending}
+              hitSlop={8}
+              style={styles.flipAgain}
+              accessibilityRole="button"
+              accessibilityHint="Replaces this result. Both captains are notified."
+            >
+              <IconUndo color={colors.textMuted} size={15} />
+              <AppText variant="caption" muted style={styles.strong}>
+                Flip again
               </AppText>
-            </View>
+            </Pressable>
           ) : null}
         </View>
       ) : null}
 
       {/* ---------------- State 3: Decided ---------------- */}
-      {data?.decision ? (
+      {data?.decision && !recallOpen ? (
         <MotiView
           from={{ opacity: 0, translateY: 12 }}
           animate={{ opacity: 1, translateY: 0 }}
           transition={{ type: 'timing', duration: 400 }}
-          style={styles.card}
+          style={[styles.card, styles.body]}
         >
-          <View style={styles.callSummaryBox}>
-            <AppText variant="caption" muted center>
-              {data.calling_team_name ? data.calling_team_name : 'Calling captain'} called{' '}
-              <AppText variant="caption" color={colors.primary} style={{ fontWeight: '800' }}>
-                {(data.called_face || 'heads').toUpperCase()}
-              </AppText>{' '}
-              · Coin landed{' '}
-              <AppText variant="caption" color={colors.primary} style={{ fontWeight: '800' }}>
-                {data.outcome.toUpperCase()}
-              </AppText>
+          <View style={styles.trophyWrap}>
+            <IconTile size={72}>
+              <IconTrophy color={colors.primary} size={34} />
+            </IconTile>
+          </View>
+          <AppText variant="heading" center style={styles.title}>
+            {winnerName} won the toss
+          </AppText>
+          <View style={[styles.decisionPill, { backgroundColor: M.chip }]}>
+            {decisionIcons[data.decision as 'bat' | 'bowl']}
+            <AppText variant="label" color={colors.primary} style={styles.strong}>
+              Elected to {tossDecisionVerb(sport, data.decision as 'bat' | 'bowl')} first
             </AppText>
           </View>
 
-          <AppText variant="heading" center style={styles.title}>
-            {data.winner_team_name} won the toss
-          </AppText>
-          <AppText style={styles.big} center>
-            and elected to {tossDecisionVerb(sport, data.decision as 'bat' | 'bowl')} first
-          </AppText>
-
-          {usesOvers && data.overs ? (
-            <AppText variant="caption" muted center>
-              {data.overs} overs per innings
-            </AppText>
-          ) : null}
+          <View style={styles.factRow}>
+            <Fact
+              label="Call"
+              value={(data.called_face || 'heads').toUpperCase()}
+              styles={styles}
+            />
+            <Fact label="Landed" value={data.outcome.toUpperCase()} styles={styles} />
+            {usesOvers && data.overs ? (
+              <Fact label="Overs" value={String(data.overs)} styles={styles} />
+            ) : null}
+          </View>
 
           <View style={styles.cta}>
             <Button
-              label="Proceed to Game →"
-              onPress={() =>
-                onProceed ? onProceed() : router.dismissTo(`/match/${matchId}`)
-              }
+              label="Proceed to game"
+              trailing={(c) => <IconArrowRight color={c} size={18} />}
+              onPress={() => (onProceed ? onProceed() : router.dismissTo(`/match/${matchId}`))}
             />
           </View>
-          <AppText variant="caption" muted center>
-            Game innings and batting orders are locked in.
-          </AppText>
         </MotiView>
       ) : null}
 
       {error ? (
-        <AppText variant="caption" color={colors.danger} style={styles.error}>
-          {error}
-        </AppText>
+        <View style={styles.errorBox}>
+          <AppText variant="caption" color={colors.danger}>
+            {error}
+          </AppText>
+        </View>
       ) : null}
     </>
   );
 }
 
+type Styles = ReturnType<typeof makeStyles>;
+
+function StepLabel({
+  n,
+  text,
+  styles,
+}: {
+  n: number;
+  text: string;
+  styles: Styles;
+}): React.ReactNode {
+  return (
+    <View style={styles.stepRow}>
+      <View style={styles.stepNum}>
+        <AppText variant="caption" style={styles.stepNumText}>
+          {n}
+        </AppText>
+      </View>
+      <AppText variant="label" style={styles.sectionTitle}>
+        {text}
+      </AppText>
+    </View>
+  );
+}
+
+function Fact({
+  label,
+  value,
+  styles,
+}: {
+  label: string;
+  value: string;
+  styles: Styles;
+}): React.ReactNode {
+  return (
+    <View style={styles.fact}>
+      <AppText variant="caption" muted>
+        {label}
+      </AppText>
+      <AppText variant="label" style={styles.factValue}>
+        {value}
+      </AppText>
+    </View>
+  );
+}
+
+/**
+ * An open match's sides are toss-time shells named "<match name> · Side A"
+ * (see perform_toss). The match name is already on screen, so only "Side A"
+ * is worth repeating -- the full string truncated badly on a phone.
+ */
+function sideName(name: string | null | undefined): string | null {
+  if (!name) return null;
+  const side = /·\s*(Side [AB])$/.exec(name);
+  return side?.[1] ?? name;
+}
+
 const makeStyles = (colors: AppColors) =>
   StyleSheet.create({
-    center: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: spacing.xxl },
+    center: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingTop: spacing.xxl,
+    },
+    flex: { flex: 1 },
+    dim: { opacity: 0.6 },
+    strong: { fontWeight: '800' },
     card: {
-      gap: spacing.md,
-      padding: spacing.lg,
-      borderRadius: radius.lg,
+      borderRadius: radius.xl,
       backgroundColor: colors.surface,
       borderWidth: 1,
       borderColor: colors.border,
     },
     cardClip: { overflow: 'hidden' },
-    heroWash: { position: 'absolute', top: 0, left: 0, right: 0, height: 330, opacity: 0.7 },
-    title: { fontFamily: 'SpaceGrotesk_700Bold', fontWeight: '700', fontSize: 24, lineHeight: 30 },
-    sectionTop: { marginTop: spacing.xs, fontWeight: '700' },
-    sectionHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.xs },
-    sectionTitle: { fontSize: 16, fontFamily: 'SpaceGrotesk_700Bold', fontWeight: '700' },
-    callSection: { gap: spacing.sm },
-    callRow: { flexDirection: 'row', gap: spacing.sm + 2 },
-    callOption: {
-      flex: 1,
+    body: { padding: spacing.lg, gap: spacing.lg },
+    hero: {
       alignItems: 'center',
-      justifyContent: 'center',
-      gap: 4,
-      paddingVertical: spacing.md,
-      paddingHorizontal: spacing.sm,
-      borderRadius: radius.md,
-      backgroundColor: colors.surface,
-      borderWidth: 1.5,
-      borderColor: colors.border,
+      paddingTop: spacing.md,
+      paddingBottom: spacing.lg,
+      paddingHorizontal: spacing.lg,
+      gap: spacing.xs,
     },
-    callOptionSelected: { borderColor: colors.primary },
-    callCoin: { width: 48, height: 48, borderRadius: 24, marginBottom: 2 },
-    callLabel: { fontFamily: 'SpaceGrotesk_700Bold', fontWeight: '700', fontSize: 17 },
-    checkBadge: {
-      position: 'absolute',
-      top: 8,
-      right: 8,
-      width: 24,
-      height: 24,
-      borderRadius: 12,
+    heroBadge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      paddingHorizontal: spacing.sm + 2,
+      paddingVertical: 4,
+      borderRadius: radius.pill,
+      backgroundColor: 'rgba(255,255,255,0.18)',
+    },
+    heroTitle: {
+      fontFamily: 'SpaceGrotesk_700Bold',
+      fontWeight: '700',
+      fontSize: 24,
+      lineHeight: 30,
+    },
+    heroSub: { opacity: 0.85, maxWidth: 280 },
+    title: {
+      fontFamily: 'SpaceGrotesk_700Bold',
+      fontWeight: '700',
+      fontSize: 22,
+      lineHeight: 28,
+    },
+    section: { gap: spacing.sm + 2 },
+    sectionTitle: {
+      fontSize: 16,
+      fontFamily: 'SpaceGrotesk_700Bold',
+      fontWeight: '700',
+    },
+    stepRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+    stepNum: {
+      width: 22,
+      height: 22,
+      borderRadius: 11,
       backgroundColor: colors.primary,
       alignItems: 'center',
       justifyContent: 'center',
     },
-    callSummaryBox: {
-      paddingHorizontal: spacing.md,
-      paddingVertical: spacing.xs,
-      borderRadius: radius.pill,
-      backgroundColor: colors.background,
-      alignSelf: 'center',
-      borderWidth: 1,
-      borderColor: colors.border,
-      marginBottom: spacing.xs,
+    stepNumText: {
+      color: colors.textInverse,
+      fontWeight: '800',
+      fontSize: 12,
+      lineHeight: 14,
     },
-    // Two to a row; cell padding stands in for the gap so halves stay exact.
-    oversGrid: { flexDirection: 'row', flexWrap: 'wrap', margin: -5 },
-    oversCell: { width: '50%', padding: 5 },
-    oversBtn: {
-      minHeight: 50,
-      borderRadius: radius.md,
+    callRow: { flexDirection: 'row', gap: spacing.sm + 2 },
+    callOption: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+      paddingVertical: spacing.sm + 2,
+      paddingHorizontal: spacing.sm + 2,
+      borderRadius: radius.lg,
+      backgroundColor: colors.surface,
       borderWidth: 1.5,
-      borderColor: colors.primary,
+      borderColor: colors.border,
+    },
+    callOptionOn: { borderColor: colors.primary, borderWidth: 2 },
+    callCoin: { width: 40, height: 40, borderRadius: 20 },
+    callCoinOff: { opacity: 0.55 },
+    callLabel: {
+      flex: 1,
+      fontFamily: 'SpaceGrotesk_700Bold',
+      fontWeight: '700',
+      fontSize: 16,
+    },
+    radio: {
+      width: 22,
+      height: 22,
+      borderRadius: 11,
+      borderWidth: 1.5,
+      borderColor: colors.border,
       alignItems: 'center',
       justifyContent: 'center',
     },
-    oversBtnOn: { backgroundColor: colors.primary },
-    cta: { marginTop: spacing.sm },
-    decisionRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.xs },
-    decisionBtn: {
-      flex: 1,
+    radioOn: { backgroundColor: colors.primary, borderColor: colors.primary },
+    // Three to a row; six options make two tidy rows on any phone width.
+    oversRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+    oversChip: {
+      flexBasis: '30%',
+      flexGrow: 1,
+      alignItems: 'center',
+      paddingVertical: spacing.sm,
+      borderRadius: radius.md,
+      borderWidth: 1.5,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+    },
+    oversChipOn: {
+      backgroundColor: colors.primary,
+      borderColor: colors.primary,
+    },
+    oversNum: {
+      fontFamily: 'SpaceGrotesk_700Bold',
+      fontWeight: '700',
+      fontSize: 18,
+      lineHeight: 22,
+    },
+    infoRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
       padding: spacing.md,
       borderRadius: radius.md,
+      backgroundColor: colors.background,
+    },
+    cta: { gap: spacing.sm },
+    resultBlock: { gap: spacing.sm, alignItems: 'center' },
+    summaryPill: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+      paddingLeft: spacing.md,
+      paddingRight: spacing.sm,
+      paddingVertical: 6,
+      borderRadius: radius.pill,
+      backgroundColor: colors.background,
+      borderWidth: 1,
+      borderColor: colors.border,
+      alignSelf: 'center',
+    },
+    summaryDot: {
+      width: 18,
+      height: 18,
+      borderRadius: 9,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    decisionRow: { flexDirection: 'row', gap: spacing.sm + 2 },
+    decisionBtn: {
+      flex: 1,
+      alignItems: 'center',
+      gap: spacing.sm,
+      paddingVertical: spacing.lg,
+      borderRadius: radius.lg,
+      borderWidth: 1.5,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+    },
+    decisionLabel: {
+      fontFamily: 'SpaceGrotesk_700Bold',
+      fontWeight: '700',
+      fontSize: 16,
+    },
+    flipAgain: {
+      flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'center',
       gap: 6,
+      alignSelf: 'center',
+      paddingVertical: spacing.xs,
     },
-    waiting: { marginTop: spacing.md, gap: spacing.sm, alignItems: 'center' },
-    big: { fontSize: 18, fontWeight: '700', color: colors.primary },
-    error: { marginTop: spacing.md },
+    trophyWrap: { alignItems: 'center' },
+    decisionPill: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+      alignSelf: 'center',
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+      borderRadius: radius.pill,
+    },
+    factRow: {
+      flexDirection: 'row',
+      borderRadius: radius.md,
+      backgroundColor: colors.background,
+      paddingVertical: spacing.sm + 2,
+    },
+    fact: { flex: 1, alignItems: 'center', gap: 2 },
+    factValue: {
+      fontFamily: 'SpaceGrotesk_700Bold',
+      fontWeight: '700',
+      fontSize: 16,
+    },
+    errorBox: {
+      marginTop: spacing.md,
+      padding: spacing.md,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      borderColor: colors.danger,
+    },
   });

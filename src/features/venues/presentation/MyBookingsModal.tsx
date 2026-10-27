@@ -183,7 +183,7 @@ export function MyBookingsModal({
             >
               <AppText
                 variant="label"
-                color={activeTab === 'upcoming' ? M.limeInk : M.muted}
+                color={activeTab === 'upcoming' ? M.green : M.muted}
                 style={[styles.tabText, activeTab === 'upcoming' && styles.tabTextActive]}
               >
                 Upcoming ({upcomingBookings.length})
@@ -197,7 +197,7 @@ export function MyBookingsModal({
             >
               <AppText
                 variant="label"
-                color={activeTab === 'past' ? M.limeInk : M.muted}
+                color={activeTab === 'past' ? M.green : M.muted}
                 style={[styles.tabText, activeTab === 'past' && styles.tabTextActive]}
               >
                 Past / Cancelled ({pastBookings.length})
@@ -406,8 +406,14 @@ export function MyBookingsModal({
                         accessibilityRole="button"
                         accessibilityLabel="Get Directions"
                       >
-                        <IconDirections size={16} color={M.limeInk} />
-                        <AppText variant="caption" color={M.limeInk} style={styles.directionsBtnText}>
+                        {/*
+                          M.green, not M.limeInk: limeInk is ink for text ON a
+                          green fill (white in light mode), and this button is
+                          a light card -- it rendered white on white. Same bug
+                          on the active tab label above.
+                        */}
+                        <IconDirections size={16} color={M.green} />
+                        <AppText variant="label" color={M.green} style={styles.directionsBtnText}>
                           Get Directions
                         </AppText>
                       </Pressable>
@@ -661,22 +667,25 @@ const makeStyles = (M: MockPalette) =>
       gap: S.sm,
       marginTop: S.xs,
     },
+    // Same height and width as the Cancel Booking button beside it, so the
+    // two actions read as a pair instead of a small chip next to a big slab.
     directionsBtn: {
+      flex: 1,
+      minHeight: 52, // Button's own minHeight
       flexDirection: 'row',
       alignItems: 'center',
+      justifyContent: 'center',
       gap: 6,
-      backgroundColor: M.cardHi,
-      paddingVertical: 8,
       paddingHorizontal: S.md,
-      borderRadius: R.sm,
-      borderWidth: 1,
-      borderColor: M.border,
+      borderRadius: R.md,
+      borderWidth: 1.5,
+      borderColor: M.green,
     },
     directionsBtnText: {
       fontWeight: '700',
-      fontSize: 12,
+      fontSize: 14,
     },
     cardActions: {
-      marginTop: 0,
+      flex: 1,
     },
   });

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { Stack, useRouter, useSegments } from 'expo-router';
+import { Stack, usePathname, useRouter, useSegments } from 'expo-router';
+import { useQueryClient } from '@tanstack/react-query';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
 import { useFonts } from 'expo-font';
@@ -57,6 +58,23 @@ function RouteGuard(): null {
   return null;
 }
 
+/**
+ * Every page shows fresh data when you land on it. Tabs and stack screens stay
+ * mounted, so their queries never re-run on their own when you navigate back;
+ * this refetches whatever is on screen and older than its staleTime (30s), so
+ * hopping between pages quickly does not refire every request.
+ */
+function RefreshOnNavigate(): null {
+  const pathname = usePathname();
+  const queryClient = useQueryClient();
+
+  useEffect(() => {
+    void queryClient.refetchQueries({ type: 'active', stale: true });
+  }, [pathname, queryClient]);
+
+  return null;
+}
+
 function ThemedStatusBar(): React.ReactElement {
   const { isDark } = useTheme();
   return <StatusBar style={isDark ? 'light' : 'dark'} />;
@@ -108,6 +126,7 @@ function RootLayout(): React.ReactNode {
     <AppProviders>
       <ThemedStatusBar />
       <RouteGuard />
+      <RefreshOnNavigate />
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="(auth)" />
         <Stack.Screen name="(tabs)" />

@@ -51,6 +51,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     ],
   },
   plugins: [
+    // Android photo cropper says "Save" instead of "Crop". See the file.
+    './plugins/withCropSaveLabel',
     'expo-router',
     'expo-font',
     'expo-status-bar',

@@ -16,7 +16,7 @@ import { MotiView } from 'moti';
 import { Stack, useRouter } from 'expo-router';
 
 import { useAuthStore } from '@core/auth/authStore';
-import { getCurrentCoords, type Coords } from '@core/location/location';
+import { getAreaNameFromCoords, getCurrentCoords, type Coords } from '@core/location/location';
 import {
   useUpdateAvatar,
   useUpdateProfile,
@@ -60,6 +60,12 @@ export default function EditProfileScreen(): React.ReactNode {
       const next = await getCurrentCoords();
       if (next) {
         setCoords(next);
+        // The Area text is what Home and match cards show, so capturing a
+        // location must update it too -- otherwise the app keeps displaying
+        // whatever was typed, however far away the player really is. A failed
+        // lookup leaves the typed text alone rather than blanking it.
+        const name = await getAreaNameFromCoords(next);
+        if (name) setAreaName(name);
         return;
       }
       // getCurrentCoords collapses "permission denied" and "lookup failed" into
@@ -230,8 +236,9 @@ export default function EditProfileScreen(): React.ReactNode {
 
         {/* Location — device GPS only. There is no Places API key yet; a Places
             autocomplete field is intended to sit here later, alongside (not
-            instead of) this button. Distinct from the Area text above: that is a
-            label people read, this is what nearby search actually matches on. */}
+            instead of) this button. The coordinates are what nearby search
+            matches on; capturing them also fills the Area text above with the
+            looked-up place name, which stays editable. */}
         <AppText variant="label" color={M.muted} style={styles.fieldLabel}>
           Location
         </AppText>

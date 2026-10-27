@@ -1,4 +1,4 @@
-import { Alert } from 'react-native';
+import { Alert, Platform } from 'react-native';
 import * as Location from 'expo-location';
 
 import { logger } from '@core/logging/logger';
@@ -34,6 +34,30 @@ async function showLocationDisclosure(): Promise<boolean> {
 }
 
 /**
+ * Permission granted is not enough: with the phone's Location switch off,
+ * getCurrentPositionAsync throws "unsatisfied device settings" and every
+ * location button looked dead, because the failure was swallowed silently.
+ * On Android this shows the system "Turn on location?" dialog; anywhere it
+ * cannot be fixed in-app, the user is told what to do.
+ */
+async function ensureLocationServicesOn(): Promise<boolean> {
+  if (await Location.hasServicesEnabledAsync()) return true;
+  if (Platform.OS === 'android') {
+    try {
+      await Location.enableNetworkProviderAsync();
+      return true;
+    } catch {
+      // Declined the system dialog; fall through to the explanation.
+    }
+  }
+  Alert.alert(
+    'Location is off',
+    'Turn on Location in your phone settings so SIXFOUR 24 can find games and venues near you.',
+  );
+  return false;
+}
+
+/**
  * Best-effort device location for stamping a match's coordinates.
  * Prominently discloses location use before requesting foreground permission.
  * Returns null (never throws) if permission is denied or lookup fails.
@@ -49,6 +73,7 @@ export async function getCurrentCoords(): Promise<Coords | null> {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== Location.PermissionStatus.GRANTED) return null;
     }
+    if (!(await ensureLocationServicesOn())) return null;
     const position = await Location.getCurrentPositionAsync({
       accuracy: Location.Accuracy.Balanced,
     });

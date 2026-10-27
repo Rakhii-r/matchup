@@ -1,10 +1,11 @@
 import type { ReactNode } from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, RefreshControl, ScrollView, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { spacing } from '@shared/theme';
 import { CONTENT_MAX_WIDTH, useBottomInset, useResponsive } from '@shared/theme/responsive';
 import { useTheme } from '@shared/theme/ThemeContext';
+import { useRefreshAll } from '@shared/ui/useRefreshAll';
 
 interface ScreenProps {
   children: ReactNode;
@@ -55,6 +56,8 @@ export function Screen({
   const { colors } = useTheme();
   const { isTablet } = useResponsive();
   const bottomInset = useBottomInset();
+  // Every scrolling screen gets pull-to-refresh for free.
+  const { refreshing, onRefresh } = useRefreshAll();
 
   // A tab screen's bottom is already reserved by the bar itself.
   const paddingBottom = insideTabs ? spacing.lg : bottomInset;
@@ -73,6 +76,9 @@ export function Screen({
       keyboardShouldPersistTaps="handled"
       keyboardDismissMode="on-drag"
       showsVerticalScrollIndicator={false}
+      refreshControl={
+        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
+      }
     >
       {children}
     </ScrollView>

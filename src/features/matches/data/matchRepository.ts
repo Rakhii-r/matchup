@@ -425,6 +425,49 @@ export const matchRepository = {
   },
 
   /**
+   * Matches in play for the user: started (`locked`) and not yet completed,
+   * where they are the organiser or a confirmed player. Feeds Home's
+   * "Continue match" card, so a game left mid-innings is one tap away.
+   *
+   * Two reads because the organiser of a team fixture has no match_players row
+   * (finalise_challenge writes none for them), so the joined list alone misses
+   * exactly the person who has to keep scoring.
+   */
+  async listLive(userId: string): Promise<{ match: Match; isOrganiser: boolean }[]> {
+    const [created, joined] = await Promise.all([
+      supabase
+        .from('matches')
+        .select('*')
+        .eq('creator_id', userId)
+        .eq('status', 'locked')
+        .order('scheduled_at', { ascending: false })
+        .limit(5),
+      supabase
+        .from('match_players')
+        .select('match:matches!inner(*)')
+        .eq('user_id', userId)
+        .eq('status', 'confirmed')
+        .eq('match.status', 'locked')
+        .limit(5),
+    ]);
+    if (created.error) throw toAppError(created.error);
+    if (joined.error) throw toAppError(joined.error);
+
+    const byId = new Map<string, { match: Match; isOrganiser: boolean }>();
+    for (const m of created.data ?? []) byId.set(m.id, { match: m, isOrganiser: true });
+    // Same loose embed typing as listJoined; the FK guarantees the shape.
+    const joinedRows = (joined.data ?? []) as unknown as { match: Match | null }[];
+    for (const row of joinedRows) {
+      if (row.match && !byId.has(row.match.id)) {
+        byId.set(row.match.id, { match: row.match, isOrganiser: false });
+      }
+    }
+    return [...byId.values()].sort((a, b) =>
+      b.match.scheduled_at.localeCompare(a.match.scheduled_at),
+    );
+  },
+
+  /**
    * Complete list of matches the user is associated with (created or joined),
    * across all statuses (open, locked, completed, cancelled).
    */

@@ -49,6 +49,7 @@ import {
   useMyChallenges,
   useNearbyOpenChallenges,
 } from '@features/teams/presentation/useChallenges';
+import { LiveMatchBanner } from '@features/matches/presentation/LiveMatchBanner';
 import { MatchOfferDetailModal } from '@features/teams/presentation/MatchOfferDetailModal';
 import { formatLabel } from '@features/teams/presentation/useActiveTeamFormat';
 import { useMyTeamsOverview } from '@features/teams/presentation/useTeams';
@@ -670,6 +671,9 @@ export default function HomeScreen(): React.ReactNode {
             </Pressable>
           </View>
         </View>
+
+        {/* A game in play comes first: leaving the Match Center mid-innings must not lose it. */}
+        <LiveMatchBanner />
 
         {/* ---------------- Hero banner ---------------- */}
         <View style={styles.heroBanner} accessible accessibilityLabel="Play, connect, compete">

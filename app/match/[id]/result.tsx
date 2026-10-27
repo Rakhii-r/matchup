@@ -8,10 +8,12 @@ import {
   Alert,
   Image,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   View,
 } from 'react-native';
+import { useRefreshAll } from '@shared/ui/useRefreshAll';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 
@@ -50,6 +52,7 @@ function formatWhen(iso: string): string {
 
 export default function MatchResultScreen(): React.ReactNode {
   const M = useMock();
+  const { refreshing, onRefresh } = useRefreshAll();
   const styles = useMemo(() => makeStyles(M), [M]);
   const { id } = useLocalSearchParams<{ id: string }>();
   const matchId = id ?? '';
@@ -337,7 +340,11 @@ export default function MatchResultScreen(): React.ReactNode {
         </View>
       ) : null}
 
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={M.green} />}
+      >
         {/* Winner / Result Celebration Card */}
         <View style={styles.winnerCard}>
           <View style={styles.markOuter}>

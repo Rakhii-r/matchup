@@ -166,6 +166,16 @@ export function useJoinedMatches() {
   });
 }
 
+/** Started, unfinished matches the user organises or is confirmed in. */
+export function useLiveMatches() {
+  const userId = useAuthStore((s) => s.session?.user.id);
+  return useQuery({
+    queryKey: ['matches', 'live', userId ?? 'anon'] as const,
+    queryFn: () => matchRepository.listLive(userId as string),
+    enabled: Boolean(userId),
+  });
+}
+
 /** Complete list of all matches created or joined by the user across all statuses. */
 export function useAllMyBookedMatches() {
   const userId = useAuthStore((s) => s.session?.user.id);

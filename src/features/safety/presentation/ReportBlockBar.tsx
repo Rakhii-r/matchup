@@ -5,7 +5,12 @@ import { useAuthStore } from '@core/auth/authStore';
 import { AppError } from '@core/errors/AppError';
 import { REPORT_REASONS } from '@features/safety/domain/reportSchema';
 import type { ReportReason } from '@features/safety/domain/reportSchema';
-import { useBlockUser, useReportUser } from '@features/safety/presentation/useSafety';
+import {
+  useBlockUser,
+  useBlockedUsers,
+  useReportUser,
+  useUnblockUser,
+} from '@features/safety/presentation/useSafety';
 import { radius, spacing, type AppColors } from '@shared/theme';
 import { useTheme } from '@shared/theme/ThemeContext';
 import { AppText } from '@shared/ui/AppText';
@@ -20,6 +25,11 @@ interface ReportBlockBarProps {
  * Compact safety control for any other user. Tapping Report reveals the fixed reason
  * list; Block asks for confirmation first since it hides the two users from each other.
  * Renders nothing when the target is the signed-in user.
+ *
+ * A blocked user shows "You blocked this player · Unblock". The blocked state
+ * is read from the block list, not only from this component's memory, so the
+ * Unblock link is still there after leaving and reopening the screen -- before,
+ * the only way back was Profile → Blocked players, which testers never found.
  */
 export function ReportBlockBar({
   targetUserId,
@@ -31,14 +41,60 @@ export function ReportBlockBar({
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const report = useReportUser();
   const block = useBlockUser();
+  const unblock = useUnblockUser();
+  const blockedList = useBlockedUsers();
   const [showReasons, setShowReasons] = useState(false);
-  const [done, setDone] = useState<'reported' | 'blocked' | null>(null);
+  const [reported, setReported] = useState(false);
 
   if (!myId || myId === targetUserId) return null;
-  if (done) {
+
+  const isBlocked = (blockedList.data ?? []).some((b) => b.userId === targetUserId);
+
+  const confirmUnblock = (): void => {
+    Alert.alert(
+      `Unblock this ${targetLabel}?`,
+      'You will see each other in games and availability again.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Unblock',
+          onPress: () =>
+            unblock.mutate(targetUserId, {
+              onError: (e) =>
+                Alert.alert(
+                  'Could not unblock',
+                  e instanceof AppError ? e.message : 'Please try again.',
+                ),
+            }),
+        },
+      ],
+    );
+  };
+
+  if (isBlocked) {
+    return (
+      <View style={[styles.row, styles.wrap]}>
+        <AppText variant="caption" muted>
+          You blocked this {targetLabel}.
+        </AppText>
+        <Pressable
+          onPress={confirmUnblock}
+          disabled={unblock.isPending}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel={`Unblock this ${targetLabel}`}
+        >
+          <AppText variant="caption" color={colors.accent} style={styles.link}>
+            {unblock.isPending ? 'Unblocking…' : 'Unblock'}
+          </AppText>
+        </Pressable>
+      </View>
+    );
+  }
+  if (reported) {
     return (
       <AppText variant="caption" muted>
-        {done === 'reported' ? 'Report sent to moderators.' : `You blocked this ${targetLabel}.`}
+        Report sent to moderators.
       </AppText>
     );
   }
@@ -49,7 +105,7 @@ export function ReportBlockBar({
       {
         onSuccess: () => {
           setShowReasons(false);
-          setDone('reported');
+          setReported(true);
         },
         onError: (e) =>
           Alert.alert('Could not report', e instanceof AppError ? e.message : 'Please try again.'),
@@ -67,8 +123,9 @@ export function ReportBlockBar({
           text: 'Block',
           style: 'destructive',
           onPress: () =>
+            // No local flag on success: the mutation refreshes the block list,
+            // and isBlocked above switches the bar to its Unblock state.
             block.mutate(targetUserId, {
-              onSuccess: () => setDone('blocked'),
               onError: (e) =>
                 Alert.alert(
                   'Could not block',
@@ -120,6 +177,7 @@ const makeStyles = (colors: AppColors) =>
   StyleSheet.create({
     wrap: { gap: spacing.sm, marginTop: spacing.xs },
     row: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+    link: { fontWeight: '700', textDecorationLine: 'underline' },
     reasons: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
     reasonChip: {
       paddingHorizontal: spacing.sm,

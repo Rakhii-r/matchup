@@ -85,13 +85,29 @@ repository, RPC or route changed.
   colour.
 - The Teams tab badge is the real team count. It used to be a hard-coded `2`.
 
+## Account deletion (27 Oct 2026)
+
+Settings → Delete account (two confirmations) calls
+`authRepository.deleteAccount`: it removes the avatar file first (storage
+refuses deletes from SQL), then `delete_my_account`, then a LOCAL sign-out.
+The RPC never deletes `auth.users`/`profiles` — that cascades into every
+match the user created and every team they own, and `deliveries` RESTRICTs it
+for anyone who ever batted or bowled. It erases instead: personal rows
+deleted, profile reduced to "Deleted player", owned squads handed to the
+longest-standing member, unstarted matches cancelled/left, and the login
+(phone, identities, sessions) removed. The public policy and deletion pages
+live in `../../netlify-site/`.
+
 ## Navigation
 
 Five tabs: **Home · Matches · Teams · Activity · Profile**.
 
 - `Home` (`(tabs)/index.tsx`) is the player dashboard — stats, my team, next
   match, pending actions, recent matches, quick actions. It answers "what is
-  happening with ME?".
+  happening with ME?". A started match (`status = 'locked'`) the user
+  organises or is confirmed in is pinned to the top as a LIVE card
+  (`LiveMatchBanner`, `matchRepository.listLive`) that reopens the Match
+  Center; it refetches on every Home focus because the tab never unmounts.
 - `Matches` (`(tabs)/matches.tsx`) is the former Home screen, moved verbatim:
   sport filter, create, join with code, my matches, nearby list. It answers
   "what can I find or join?".
@@ -271,6 +287,20 @@ Rules that exist because their absence was a shipped bug. Do not undo them.
   every subscriber's RLS check against every change, and the event shows two
   popups because the queue already announces it.
 - Watchers poll the live score every 8s (`WATCHER_POLL_MS`), not 4s.
+- **Every page refreshes itself (27 Oct 2026).** `RefreshOnNavigate` in
+  `app/_layout.tsx` refetches the on-screen queries older than `staleTime` on
+  every route change, because tabs and stack screens stay mounted and would
+  otherwise show whatever they loaded first. `<Screen scroll>` has
+  pull-to-refresh built in via `useRefreshAll`; a screen with its own
+  ScrollView/FlatList adds a `RefreshControl` with the same hook.
+- **Location permission is not location.** With the phone's Location switch
+  off, `getCurrentPositionAsync` throws and every location button looked dead.
+  `getCurrentCoords` now shows Android's "Turn on location?" dialog first, and
+  tells the user when it still cannot get a fix.
+- **Local release builds must regenerate `app.manifest`.** expo-updates'
+  `create<Variant>UpdatesResources` declares only string inputs, so Gradle
+  never re-ran it and any image added later rendered blank (the toss coins).
+  `android/app/build.gradle` forces it to run every build.
 - `logger.error` reaches Sentry through the sink registered in `initSentry`.
 
 Lists are capped, not paginated. The plan is `docs/PAGINATION_PLAN.md`.
@@ -330,6 +360,13 @@ makes the split safe. An open match has `team_a_id`, `team_b_id` and
   Search Distance chips were stored and never read. `finalise_challenge` does
   not copy the radius onto the match it creates, so it is null on every team
   fixture and the clause is a no-op for them.
+- **The toss gives an open match two shell teams** (`<match name> · Side A` /
+  `· Side B`, both owned by the organiser) so scoring has sides to point at.
+  They carry `teams.is_match_side = true` (23 Oct 2026) and are excluded from
+  `get_my_teams_overview` and `teamRepository.listMine` -- before that every
+  tossed open match added two "duplicate" cards to the organiser's My Teams.
+  Never list a team in squad UI without filtering this flag; the toss panel
+  shortens their names to "Side A" / "Side B".
 - `list_match_players` returns `role` and orders the host first. Its
   visibility rule is unchanged, and it is what makes the Players list work for
   a joined player as well as the creator: an open-match joiner is `confirmed`,

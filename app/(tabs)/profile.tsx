@@ -7,7 +7,8 @@
  * Individual player batting/bowling averages have been simplified to focus on team outcomes.
  */
 import { useMemo, useState } from 'react';
-import { Image, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Image, Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { useRefreshAll } from '@shared/ui/useRefreshAll';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -337,6 +338,7 @@ function MatchCard({
 
 export default function ProfileScreen(): React.ReactNode {
   const M = useMock();
+  const { refreshing, onRefresh } = useRefreshAll();
   // Reserve the tab bar plus the device's bottom inset, or the last card in
   // this list sits underneath the bar.
   const tabContentPadding = useTabContentPadding();
@@ -359,6 +361,7 @@ export default function ProfileScreen(): React.ReactNode {
       <ScrollView
         contentContainerStyle={[styles.scroll, { paddingBottom: tabContentPadding }]}
         showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={M.green} />}
       >
         {/* Sky and stadium behind the header and the identity block. */}
         <View style={styles.heroArea}>

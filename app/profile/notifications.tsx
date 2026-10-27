@@ -10,7 +10,7 @@
  * An absent key means enabled, so a profile that has never opened this screen
  * keeps every notification and needed no backfill.
  */
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Switch, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack } from 'expo-router';
@@ -44,23 +44,36 @@ const GROUPS: { key: string; label: string; description: string }[] = [
   },
 ];
 
+/** Mid grey: visible as an empty track on both light and dark cards. */
+const SWITCH_TRACK_OFF = '#94A3B8';
+
 export default function NotificationSettingsScreen(): React.ReactNode {
   const M = useMock();
   const styles = useMemo(() => makeStyles(M), [M]);
-  const profile = useAuthStore((s) => s.profile);
   const update = useUpdateNotifPrefs();
 
-  const prefs = profile?.notif_prefs ?? {};
+  // What the switches show. Seeded once from the profile and flipped locally on
+  // tap, so a switch moves in the same frame as the finger -- it no longer
+  // waits on the network or on an app-wide profile re-render. Absent means
+  // enabled; only an explicit false mutes.
+  const [enabled, setEnabled] = useState<Record<string, boolean>>(() => {
+    const saved = (useAuthStore.getState().profile?.notif_prefs ?? {}) as Record<string, boolean>;
+    return Object.fromEntries(GROUPS.map((g) => [g.key, saved[g.key] !== false]));
+  });
 
-  const onToggle = (key: string, enabled: boolean): void => {
+  const onToggle = (key: string, next: boolean): void => {
+    setEnabled((prev) => ({ ...prev, [key]: next }));
     update.mutate(
-      { [key]: enabled },
+      { [key]: next },
       {
-        onError: (e: unknown) =>
+        onError: (e: unknown) => {
+          // Put back only this switch; others may have saved since.
+          setEnabled((prev) => ({ ...prev, [key]: !next }));
           Alert.alert(
             'Could not save',
             e instanceof Error ? e.message : 'Please check your connection and try again.',
-          ),
+          );
+        },
       },
     );
   };
@@ -75,8 +88,7 @@ export default function NotificationSettingsScreen(): React.ReactNode {
         </AppText>
 
         {GROUPS.map((g) => {
-          // Absent means enabled -- only an explicit false mutes.
-          const enabled = prefs[g.key] !== false;
+          const on = enabled[g.key] ?? true;
           return (
             <View key={g.key} style={styles.row}>
               <View style={{ flex: 1 }}>
@@ -87,11 +99,20 @@ export default function NotificationSettingsScreen(): React.ReactNode {
                   {g.description}
                 </AppText>
               </View>
+              {/*
+                Never disabled while saving: greying every switch out on each
+                tap was half of the reported flicker. Taps queue instead (see
+                useUpdateNotifPrefs).
+              */}
               <Switch
-                value={enabled}
-                disabled={update.isPending}
+                value={on}
                 onValueChange={(next) => onToggle(g.key, next)}
-                trackColor={{ false: M.border, true: M.green }}
+                // Explicit on both platforms: Android's default ON thumb is a
+                // pale teal that testers read as "not on", and M.border made
+                // the OFF track nearly invisible.
+                trackColor={{ false: SWITCH_TRACK_OFF, true: M.green }}
+                thumbColor={on ? '#FFFFFF' : '#F1F5F9'}
+                ios_backgroundColor={SWITCH_TRACK_OFF}
                 accessibilityLabel={g.label}
               />
             </View>

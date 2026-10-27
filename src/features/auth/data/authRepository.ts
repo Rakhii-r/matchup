@@ -60,4 +60,26 @@ export const authRepository = {
       throw toAppError(error);
     }
   },
+
+  /**
+   * Permanently deletes the signed-in account (Play / App Store requirement).
+   * delete_my_account erases personal data and the login server-side; match
+   * records stay, shown as "Deleted player". See its migration for why it is
+   * not a plain delete of the user row.
+   */
+  async deleteAccount(userId: string): Promise<void> {
+    // The photo goes first: storage refuses deletes from SQL, and once the
+    // RPC has run this user can no longer authenticate to remove it.
+    const { error: photoError } = await supabase.storage
+      .from('avatars')
+      .remove([`${userId}/avatar.jpg`]);
+    if (photoError) throw toAppError(photoError);
+
+    const { error } = await supabase.rpc('delete_my_account');
+    if (error) throw toAppError(error);
+
+    // Local only: the server sessions are already gone, so a global sign-out
+    // would fail with "session not found" and leave the app signed in.
+    await supabase.auth.signOut({ scope: 'local' });
+  },
 };
