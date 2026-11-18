@@ -119,6 +119,9 @@ function distanceKm(
   return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+/** How far from home a venue may be and still be featured on Home. */
+const FEATURED_VENUE_RADIUS_KM = 50;
+
 function km(value: number | null): string {
   if (value == null) return '';
   return value < 1 ? `${Math.round(value * 1000)} m` : `${value.toFixed(1)} km`;
@@ -450,6 +453,24 @@ export default function HomeScreen(): React.ReactNode {
   const sports = useActiveSports();
   const nearby = useNearbyMatches(coords, sport);
   const venues = useVenues();
+  /**
+   * Featured = near the player. With a home location, venues within
+   * FEATURED_VENUE_RADIUS_KM, nearest first; a Hyderabad player was being shown
+   * Pune boxes 500 km away. Without one there is nothing to measure from, so
+   * every venue is listed as before.
+   */
+  const homeLat = coords?.lat;
+  const homeLng = coords?.lng;
+  const featuredVenues = useMemo(() => {
+    const list = venues.data ?? [];
+    if (homeLat == null || homeLng == null) return list;
+    const from = { lat: homeLat, lng: homeLng };
+    return list
+      .map((v) => ({ v, d: distanceKm(from, v) }))
+      .filter((x): x is { v: (typeof list)[number]; d: number } => x.d != null && x.d <= FEATURED_VENUE_RADIUS_KM)
+      .sort((a, b) => a.d - b.d)
+      .map((x) => x.v);
+  }, [venues.data, homeLat, homeLng]);
   const joined = useJoinedMatches();
   const challenges = useMyChallenges();
   const openChallenges = useNearbyOpenChallenges(coords, sport, undefined, null);
@@ -1228,19 +1249,21 @@ export default function HomeScreen(): React.ReactNode {
         />
         {venues.isLoading ? (
           <ActivityIndicator color={M.green} />
-        ) : (venues.data ?? []).length === 0 ? (
+        ) : featuredVenues.length === 0 ? (
           <View style={styles.cardContainer}>
             <AppText variant="caption" color={M.muted}>
-              No venues listed yet.
+              {coords ? 'No venues listed near you yet.' : 'No venues listed yet.'}
             </AppText>
           </View>
         ) : (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.rail}>
-            {(venues.data ?? []).map((v, idx) => {
-              const ratingVal = v.rating ?? (idx % 2 === 0 ? '4.8' : '5.0');
-              const priceVal = v.price_per_hour ?? (idx % 2 === 0 ? 800 : 900);
-              const tagLabel = idx % 2 === 0 ? 'Open Now' : 'Lightning Fast';
-              const distText = coords ? km(distanceKm(coords, v)) : (idx % 2 === 0 ? '506 km' : '338 m away');
+            {featuredVenues.map((v) => {
+              // Only what the venue row actually says. These used to fall back
+              // to invented values (a 4.8 rating, ₹800/hr, "Open Now", "506 km")
+              // whenever a column was empty, which every listed venue is.
+              const ratingVal = v.rating;
+              const priceVal = v.price_per_hour;
+              const distText = km(distanceKm(coords, v));
 
               return (
                 <Pressable
@@ -1252,41 +1275,49 @@ export default function HomeScreen(): React.ReactNode {
                 >
                   <View style={styles.venueImgWrap}>
                     <Image source={venueImage(v)} style={styles.venueImg} />
-                    {/* Rating badge */}
-                    <View style={styles.venueRatingBadge}>
-                      <IconStar color="#F59E0B" size={11} />
-                      <AppText variant="caption" color="#0F172A" style={styles.venueRatingText}>
-                        {ratingVal}
-                      </AppText>
-                    </View>
-                    {/* Price badge */}
-                    <View style={styles.venuePriceBadge}>
-                      <AppText variant="caption" color="#FFFFFF" style={styles.venuePriceText}>
-                        ₹{priceVal}/hr
-                      </AppText>
-                    </View>
+                    {ratingVal != null ? (
+                      <View style={styles.venueRatingBadge}>
+                        <IconStar color="#F59E0B" size={11} />
+                        <AppText variant="caption" color="#0F172A" style={styles.venueRatingText}>
+                          {ratingVal}
+                        </AppText>
+                      </View>
+                    ) : null}
+                    {priceVal != null ? (
+                      <View style={styles.venuePriceBadge}>
+                        <AppText
+                          variant="caption"
+                          color="#FFFFFF"
+                          style={styles.venuePriceText}
+                          numberOfLines={1}
+                        >
+                          ₹{priceVal}/hr
+                        </AppText>
+                      </View>
+                    ) : null}
                   </View>
 
                   <View style={styles.venueBody}>
                     <AppText variant="label" color={M.text} numberOfLines={1} style={styles.venueName}>
                       {v.name}
                     </AppText>
-                    <View style={styles.venueLocationRow}>
-                      <IconPin color={M.muted} size={11} />
-                      <AppText variant="caption" color={M.muted} numberOfLines={1} style={styles.venueAddress}>
-                        {v.address || 'Wakad, Pune'}
-                      </AppText>
-                    </View>
-                    <View style={styles.venueFooter}>
-                      <View style={styles.venueDistChip}>
-                        <AppText variant="caption" color={M.green} style={styles.venueDistText}>
-                          {distText}
+                    {v.address ? (
+                      <View style={styles.venueLocationRow}>
+                        <IconPin color={M.muted} size={11} />
+                        <AppText variant="caption" color={M.muted} numberOfLines={1} style={styles.venueAddress}>
+                          {v.address}
                         </AppText>
                       </View>
-                      <AppText variant="caption" color={M.green} style={styles.venueStatusText}>
-                        {tagLabel}
-                      </AppText>
-                    </View>
+                    ) : null}
+                    {distText ? (
+                      <View style={styles.venueFooter}>
+                        <View style={styles.venueDistChip}>
+                          <AppText variant="caption" color={M.green} style={styles.venueDistText}>
+                            {distText} away
+                          </AppText>
+                        </View>
+                      </View>
+                    ) : null}
                   </View>
                 </Pressable>
               );
@@ -1472,6 +1503,7 @@ const makeStyles = (M: MockPalette) =>
       flexDirection: 'row',
       alignItems: 'center',
       alignSelf: 'flex-start',
+      maxWidth: '100%',
       gap: 4,
       marginTop: 3,
       backgroundColor: M.chip,
@@ -1482,7 +1514,9 @@ const makeStyles = (M: MockPalette) =>
     locationText: {
       fontSize: 12,
       fontWeight: '600',
-      maxWidth: 130,
+      // Shrinks only when the pill reaches the header's width; a fixed 130
+      // cut "Kukatpally, Hyderabad" to "Kukatpally, Hy…" with room to spare.
+      flexShrink: 1,
     },
     heroBanner: {
       flexDirection: 'row',

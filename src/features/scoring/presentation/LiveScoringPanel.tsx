@@ -37,7 +37,6 @@ import {
 } from '@features/scoring/presentation/useScoring';
 import {
   EXTRA_LABEL,
-  WICKET_LABEL,
   chase,
   formatOvers,
   runRate,
@@ -61,13 +60,22 @@ import {
 } from '@shared/ui/icons';
 
 const RUN_BUTTONS = [0, 1, 2, 3, 4, 6];
+/** Boundaries get the brand chartreuse so they stand out on the keypad. Text on
+ *  it is near-black: the lime fails contrast with white (see CLAUDE.md). */
+const BOUNDARY_FILL = '#98BB01';
+const BOUNDARY_INK = '#141600';
 /*
   Byes and leg byes removed on the owner's call -- box cricket does not score
   them. 'bye' and 'leg_bye' remain valid in the DB CHECK so historical rows
   still read back; nothing new can create one.
 */
 const EXTRAS: ExtraType[] = ['wide', 'no_ball'];
-const WICKETS: WicketType[] = ['bowled', 'caught', 'lbw', 'run_out', 'stumped', 'hit_wicket'];
+/*
+  One tap, one wicket -- the owner's call (30 Oct 2026): no "How out?" step.
+  Balls carry no batter or bowler, so the dismissal type never fed a figure;
+  the column still needs a value from its CHECK list, and 'bowled' is it.
+*/
+const WICKET: WicketType = 'bowled';
 
 interface LiveScoringPanelProps {
   matchId: string;
@@ -172,15 +180,6 @@ export function LiveScoringPanel({
     }
   }
 
-  /*
-    Why this is a panel and not an Alert.
-
-    It used to be `Alert.alert('How out?', ...)` with all six wicket types plus
-    Cancel. Android's native alert renders AT MOST THREE buttons -- the rest are
-    silently dropped -- so most dismissals could not be recorded at all, which
-    is why wickets never appeared on the scoreboard.
-  */
-  const [wicketOpen, setWicketOpen] = useState(false);
 
   /**
    * Finish the match — the second half of the end-of-match sequence, on its own
@@ -436,54 +435,37 @@ export function LiveScoringPanel({
             </View>
           </View>
 
-          {wicketOpen ? (
-            <View style={styles.card}>
-              {head(<IconWicket color={colors.danger} size={18} />, 'How out?')}
-              <View style={styles.row}>
-                {WICKETS.map((w) => (
-                  <Button
-                    key={w}
-                    label={WICKET_LABEL[w]}
-                    variant="danger"
-                    disabled={record.isPending}
-                    onPress={() => {
-                      setWicketOpen(false);
-                      void send(0, w);
-                    }}
-                  />
-                ))}
-              </View>
-              <Button
-                label="Cancel"
-                variant="secondary"
-                onPress={() => setWicketOpen(false)}
-              />
-            </View>
-          ) : null}
-
           <View style={styles.card}>
             {head(<IconCricket color={colors.primary} size={18} />, 'Runs')}
             <View style={styles.indent}>
               <View style={styles.keys}>
-                {RUN_BUTTONS.map((n) => (
-                  <View key={n} style={styles.keyCell}>
-                    <Pressable
-                      disabled={record.isPending}
-                      onPress={() => void send(n, null)}
-                      style={({ pressed }) => [
-                        styles.key,
-                        { opacity: record.isPending ? 0.5 : pressed ? 0.8 : 1 },
-                      ]}
-                      accessibilityRole="button"
-                      accessibilityLabel={`${n} run${n === 1 ? '' : 's'}`}
-                      accessibilityState={{ disabled: record.isPending }}
-                    >
-                      <AppText variant="heading" color={colors.textInverse} style={styles.keyText}>
-                        {n}
-                      </AppText>
-                    </Pressable>
-                  </View>
-                ))}
+                {RUN_BUTTONS.map((n) => {
+                  const boundary = n === 4 || n === 6;
+                  return (
+                    <View key={n} style={styles.keyCell}>
+                      <Pressable
+                        disabled={record.isPending}
+                        onPress={() => void send(n, null)}
+                        style={({ pressed }) => [
+                          styles.key,
+                          boundary ? { backgroundColor: BOUNDARY_FILL } : null,
+                          { opacity: record.isPending ? 0.5 : pressed ? 0.8 : 1 },
+                        ]}
+                        accessibilityRole="button"
+                        accessibilityLabel={`${n} run${n === 1 ? '' : 's'}`}
+                        accessibilityState={{ disabled: record.isPending }}
+                      >
+                        <AppText
+                          variant="heading"
+                          color={boundary ? BOUNDARY_INK : colors.textInverse}
+                          style={styles.keyText}
+                        >
+                          {n}
+                        </AppText>
+                      </Pressable>
+                    </View>
+                  );
+                })}
               </View>
               <View style={styles.pair}>
                 <View style={styles.pairCell}>
@@ -492,7 +474,7 @@ export function LiveScoringPanel({
                     variant="danger"
                     icon={(c) => <IconWicket color={c} size={20} />}
                     disabled={record.isPending}
-                    onPress={() => setWicketOpen((v) => !v)}
+                    onPress={() => void send(0, WICKET)}
                   />
                 </View>
                 <View style={styles.pairCell}>
@@ -657,7 +639,9 @@ const makeStyles = (colors: AppColors) =>
     indent: { gap: spacing.sm, paddingLeft: 36 + spacing.sm + 4 },
     row: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, alignItems: 'center' },
     overRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm + 4 },
-    ballRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 5, maxWidth: '60%' },
+    // 60% fitted five dots; a six-ball over with an extra wrapped its last
+    // ball onto a second line under the first.
+    ballRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 4, maxWidth: '75%' },
     ball: { minWidth: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
     ballFilled: { backgroundColor: colors.primary, paddingHorizontal: 6 },
     ballWicket: { backgroundColor: colors.danger },
@@ -676,7 +660,9 @@ const makeStyles = (colors: AppColors) =>
     // Five keys to a row. Cell padding stands in for a gap so the percentages
     // add up to exactly one row on every width.
     keys: { flexDirection: 'row', flexWrap: 'wrap', margin: -4 },
-    keyCell: { width: '20%', padding: 4 },
+    // Six buttons: three to a row gives a clean 2x3 grid. At 20% the sixth
+    // ("6") wrapped onto a row of its own, stuck to the left.
+    keyCell: { width: '33.333%', padding: 4 },
     key: {
       minHeight: 52,
       borderRadius: radius.md,

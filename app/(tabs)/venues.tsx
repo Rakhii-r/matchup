@@ -16,7 +16,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect } from 'expo-router';
 
 import { useVenues } from '@features/venues/presentation/useVenues';
-import { useSportLabel } from '@features/sports/presentation/useSports';
+import { useActiveSports, useSportLabel } from '@features/sports/presentation/useSports';
 import { CourtSlotPickerSheet } from '@features/venues/presentation/CourtSlotPickerSheet';
 import { MyBookingsModal } from '@features/venues/presentation/MyBookingsModal';
 import { useMyBookings } from '@features/venues/presentation/useVenueBookings';
@@ -46,20 +46,39 @@ function callVenue(phone: string): void {
   void Linking.openURL(`tel:${phone}`);
 }
 
-const SPORT_FILTERS: { value: Sport | null; label: string }[] = [
-  { value: null, label: 'All' },
-  { value: 'box_cricket', label: 'Cricket' },
-  { value: 'badminton', label: 'Badminton' },
-];
-
 export default function VenuesScreen(): React.ReactNode {
   const M = useMock();
   // Reserve the tab bar plus the device's bottom inset, or the last card in
   // this list sits underneath the bar.
   const tabContentPadding = useTabContentPadding();
   const styles = useMemo(() => makeStyles(M), [M]);
-  const { data: venues, isLoading, isError, refetch, isRefetching } = useVenues();
+  const { data: allVenues, isLoading, isError, refetch, isRefetching } = useVenues();
   const sportLabel = useSportLabel();
+  const activeSports = useActiveSports();
+
+  /*
+    A sport switched off in Sports Management must vanish here too. This list
+    used to hard-code both sports, so with badminton hidden everywhere else the
+    tab still offered a Badminton filter and bookable badminton-only venues.
+    Inactive sports are stripped from each venue, and a venue left with none is
+    dropped. Until the sports query answers, nothing is filtered rather than
+    showing an empty tab.
+  */
+  const venues = useMemo(() => {
+    if (!allVenues || !activeSports.data) return allVenues;
+    const on = new Set(activeSports.data.map((s) => s.sport));
+    return allVenues
+      .map((v) => ({ ...v, sport_types: v.sport_types.filter((s) => on.has(s)) }))
+      .filter((v) => v.sport_types.length > 0);
+  }, [allVenues, activeSports.data]);
+
+  const sportFilters = useMemo<{ value: Sport | null; label: string }[]>(
+    () => [
+      { value: null, label: 'All' },
+      ...(activeSports.data ?? []).map((s) => ({ value: s.sport, label: s.name })),
+    ],
+    [activeSports.data],
+  );
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedSport, setSelectedSport] = useState<Sport | null>(null);
@@ -203,7 +222,7 @@ export default function VenuesScreen(): React.ReactNode {
 
         {showFilters || selectedSport !== null ? (
           <View style={styles.filterRow}>
-            {SPORT_FILTERS.map((f) => {
+            {sportFilters.map((f) => {
               const active = selectedSport === f.value;
               return (
                 <Pressable

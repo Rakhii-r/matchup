@@ -15,7 +15,7 @@ import { R, S, useMock, type MockPalette } from '@shared/theme/mockTheme';
 import { AppText } from '@shared/ui/AppText';
 import { Button } from '@shared/ui/Button';
 import { IconTile } from '@shared/ui/decor';
-import { IconCalendar, IconChevron, IconInbox, IconSwords, IconUsers } from '@shared/ui/icons';
+import { IconCalendar, IconChevron, IconSwords, IconUsers } from '@shared/ui/icons';
 import { Screen } from '@shared/ui/Screen';
 
 const WEEKDAY = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -181,7 +181,14 @@ export default function ChallengesScreen(): React.ReactNode {
               <IconCalendar color={M.muted} size={15} />
               <AppText variant="caption" color={M.muted} numberOfLines={1} style={styles.whenText}>
                 {c.venue_name ? `${c.venue_name} · ` : ''}
-                {formatWhen(c.scheduled_at)} • {c.total_slots} players
+                {formatWhen(c.scheduled_at)}
+              </AppText>
+            </View>
+            {/* Its own line: on one line with the date it was the part that got cut off. */}
+            <View style={styles.whenRow}>
+              <IconUsers color={M.muted} size={15} />
+              <AppText variant="caption" color={M.muted} style={styles.whenText}>
+                {c.total_slots} players · {c.total_slots / 2}v{c.total_slots / 2}
               </AppText>
             </View>
             {c.message ? (
@@ -254,20 +261,12 @@ export default function ChallengesScreen(): React.ReactNode {
     );
   };
 
+  // One quiet line under the "(0)" heading. The dashed "Nothing here yet."
+  // card that stood here looked like a broken, empty challenge.
   const emptyBox = (text: string): React.ReactNode => (
-    <View style={styles.empty}>
-      <IconTile size={44}>
-        <IconInbox color={M.green} size={22} />
-      </IconTile>
-      <View style={{ flex: 1 }}>
-        <AppText variant="label" color={M.text}>
-          Nothing here yet.
-        </AppText>
-        <AppText variant="caption" color={M.muted}>
-          {text}
-        </AppText>
-      </View>
-    </View>
+    <AppText variant="caption" color={M.muted} style={styles.empty}>
+      {text}
+    </AppText>
   );
 
   return (
@@ -306,18 +305,7 @@ const makeStyles = (M: MockPalette) =>
   StyleSheet.create({
     heading: { marginTop: S.md, marginBottom: S.sm + 2, letterSpacing: 0.8 },
     notice: { gap: S.sm, paddingVertical: S.lg, alignItems: 'flex-start' },
-    empty: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: S.md,
-      padding: S.md,
-      borderRadius: R.lg,
-      borderWidth: 1.5,
-      borderStyle: 'dashed',
-      borderColor: M.border,
-      backgroundColor: M.chip,
-      marginBottom: S.sm,
-    },
+    empty: { marginBottom: S.sm },
     row: {
       padding: S.md,
       marginBottom: S.sm + 4,

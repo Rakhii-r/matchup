@@ -348,7 +348,7 @@ export function MyBookingsModal({
                           </AppText>
                           <View style={styles.iconValRow}>
                             <IconClock color={M.green} size={13} />
-                            <AppText variant="label" color={M.green} style={styles.timeValue}>
+                            <AppText variant="label" color={M.green} style={styles.timeValue} numberOfLines={2}>
                               {timeWindow}
                             </AppText>
                           </View>
@@ -621,14 +621,20 @@ const makeStyles = (M: MockPalette) =>
       fontSize: 12,
       fontWeight: '600',
     },
+    // "10:00 AM – 12:00 PM" is wider than half a card on a small phone and was
+    // clipped at the right edge; it may now wrap within its column.
     timeValue: {
       fontSize: 11,
       fontWeight: '700',
+      flexShrink: 1,
+      textAlign: 'center',
     },
     iconValRow: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 3,
+      maxWidth: '100%',
+      paddingHorizontal: 4,
     },
     detailDivider: {
       width: 1,

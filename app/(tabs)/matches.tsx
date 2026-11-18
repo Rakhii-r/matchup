@@ -42,7 +42,7 @@ import {
 import { useMyTeamsOverview } from '@features/teams/presentation/useTeams';
 import { recruitRepository } from '@features/teams/data/recruitRepository';
 import type { NearbyOpenChallenge } from '@features/teams/domain/challengeSchema';
-import { useSportLabel } from '@features/sports/presentation/useSports';
+import { useActiveSports, useSportLabel } from '@features/sports/presentation/useSports';
 import type { Match } from '@features/matches/domain/matchSchema';
 import type { MatchStatus, Sport } from '@shared/types/database.types';
 import { R, S, useMock, type MockPalette } from '@shared/theme/mockTheme';
@@ -73,11 +73,6 @@ function formatWhen(iso: string): string {
   const mm = String(d.getMinutes()).padStart(2, '0');
   return `${WEEKDAY[d.getDay()]} ${d.getDate()} ${MONTH[d.getMonth()]}, ${hh}:${mm}`;
 }
-
-const SPORT_CARDS: { value: Sport; label: string }[] = [
-  { value: 'box_cricket', label: 'Box Cricket' },
-  { value: 'badminton', label: 'Badminton' },
-];
 
 const STATUS_LABEL: Record<MatchStatus, string> = {
   open: 'OPEN',
@@ -291,6 +286,22 @@ export default function NearbyScreen(): React.ReactNode {
   const [challengingId, setChallengingId] = useState<string | null>(null);
   const [selectedOffer, setSelectedOffer] = useState<NearbyOpenChallenge | null>(null);
   const sportLabel = useSportLabel();
+  // Sport picker and both lists follow Sports Management: a hidden sport has
+  // no button, and its matches and open challenges are not listed. Until the
+  // query answers nothing is filtered, so the tab never flashes empty.
+  const activeSports = useActiveSports();
+  const sportCards = useMemo<{ value: Sport; label: string }[]>(
+    () => (activeSports.data ?? []).map((s) => ({ value: s.sport, label: s.name })),
+    [activeSports.data],
+  );
+  const isSportOn = useCallback(
+    (s: string) => !activeSports.data || activeSports.data.some((a) => a.sport === s),
+    [activeSports.data],
+  );
+  const nearbyChallenges = useMemo(
+    () => (openChallenges.data ?? []).filter((c) => isSportOn(c.sport)),
+    [openChallenges.data, isSportOn],
+  );
 
   // A card must never offer to join something you are already on. The nearby
   // RPC returns matches, not memberships, so the only place that answer exists
@@ -306,8 +317,25 @@ export default function NearbyScreen(): React.ReactNode {
   // doesn't open on an empty screen. When both are empty, the empty state shows.
   const list = useMemo<Match[]>(() => {
     const real = nearby.data ?? [];
-    return dedupeById(showDemoMatches ? [...real, ...DEMO_MATCHES] : real);
-  }, [nearby.data]);
+    return dedupeById(showDemoMatches ? [...real, ...DEMO_MATCHES] : real).filter((m) =>
+      isSportOn(m.sport),
+    );
+  }, [nearby.data, isSportOn]);
+
+  /*
+    Nothing inside the chosen distance falls back to every open game, nearest
+    first (radius 0 = no distance filter in nearby_matches). Without it a
+    player outside a covered city -- or a store reviewer abroad -- landed on an
+    empty screen and had to find the "All" chip on their own. Only runs when
+    location is known, a distance is set, and the nearby query came back empty.
+  */
+  const fallbackActive = coords !== null && radiusM > 0 && nearby.isSuccess && list.length === 0;
+  const fallback = useNearbyMatches(coords, sport, 0, fallbackActive);
+  const fallbackList = useMemo<Match[]>(
+    () => dedupeById(fallback.data ?? []).filter((m) => isSportOn(m.sport)),
+    [fallback.data, isSportOn],
+  );
+  const shownList = fallbackActive ? fallbackList : list;
 
   const goCreate = () =>
     router.push({ pathname: '/match/create', params: sport ? { sport } : {} });
@@ -442,9 +470,14 @@ export default function NearbyScreen(): React.ReactNode {
 
   // Which non-list state (if any) to show under the header. When null, the list
   // of match cards renders instead.
-  const busy = locating || nearby.isLoading;
-  const showCards = !busy && !nearby.isError && list.length > 0;
-  const data = showCards ? list : [];
+  const busy = locating || nearby.isLoading || (fallbackActive && fallback.isLoading);
+  const loadFailed = nearby.isError || (fallbackActive && fallback.isError);
+  const showCards = !busy && !loadFailed && shownList.length > 0;
+  const data = showCards ? shownList : [];
+  const refetchGames = () => {
+    void nearby.refetch();
+    if (fallbackActive) void fallback.refetch();
+  };
 
   const renderItem = ({ item }: { item: Match }) => {
     const filled = item.filled_slots;
@@ -577,7 +610,7 @@ export default function NearbyScreen(): React.ReactNode {
         filter, so "all sports" needs no third segment.
       */}
       <View style={styles.sportRow}>
-        {SPORT_CARDS.map(({ value, label }) => {
+        {sportCards.map(({ value, label }) => {
           const on = sport === value;
           const Icon = value === 'box_cricket' ? IconCricket : IconBadminton;
           return (
@@ -718,13 +751,13 @@ export default function NearbyScreen(): React.ReactNode {
         Open Team Challenges.
         Unblocked so fixtures are visible and discoverable to all players across all formats.
       */}
-      {openChallenges.data && openChallenges.data.length > 0 ? (
+      {nearbyChallenges.length > 0 ? (
         <View style={styles.challengeSection}>
           <View style={styles.sectionHeaderRow}>
             <View style={styles.challengeSectionPill}>
               <View style={styles.challengeSectionDot} />
               <AppText variant="caption" color={M.limeInk} style={{ fontWeight: '800', fontSize: 11 }}>
-                {`TEAMS LOOKING FOR OPPONENTS (${openChallenges.data.length})`}
+                {`TEAMS LOOKING FOR OPPONENTS (${nearbyChallenges.length})`}
               </AppText>
             </View>
           </View>
@@ -733,7 +766,7 @@ export default function NearbyScreen(): React.ReactNode {
             horizontal
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.challengeList}
-            data={openChallenges.data}
+            data={nearbyChallenges}
             keyExtractor={(item) => item.challenge_id}
             renderItem={({ item }) => {
               const isApplied = item.applied_status === 'interested';
@@ -824,27 +857,34 @@ export default function NearbyScreen(): React.ReactNode {
 
       {/* Section heading — only when cards are shown below */}
       {showCards && data.length > 0 ? (
-        <AppText variant="label" color={M.text} style={styles.listHeading}>
-          {coords ? 'Nearby games' : 'All games'}
-        </AppText>
+        <>
+          <AppText variant="label" color={M.text} style={styles.listHeading}>
+            {fallbackActive ? 'All games' : coords ? 'Nearby games' : 'All games'}
+          </AppText>
+          {fallbackActive ? (
+            <AppText variant="caption" color={M.muted} style={{ marginTop: -S.xs, marginBottom: S.sm }}>
+              {`No open games within ${formatRadius(radiusM)} · showing all, nearest first`}
+            </AppText>
+          ) : null}
+        </>
       ) : null}
 
       {/* Non-list states render here, still under the buttons */}
       {busy ? (
         <SkeletonCards />
-      ) : nearby.isError ? (
+      ) : loadFailed ? (
         <View style={styles.notice}>
           <AppText color={M.muted} center>
             Could not load games.
           </AppText>
-          <ScalePressable onPress={() => void nearby.refetch()} style={styles.retryBtn}>
+          <ScalePressable onPress={refetchGames} style={styles.retryBtn}>
             <AppText variant="label" color={M.text}>
               Retry
             </AppText>
           </ScalePressable>
         </View>
-      ) : list.length === 0 ? (
-        <EmptyState onCreate={goCreate} radiusM={radiusM} />
+      ) : shownList.length === 0 ? (
+        <EmptyState onCreate={goCreate} radiusM={fallbackActive ? 0 : radiusM} />
       ) : null}
     </View>
   );
@@ -857,8 +897,8 @@ export default function NearbyScreen(): React.ReactNode {
         keyExtractor={(m) => m.id}
         renderItem={renderItem}
         ListHeaderComponent={ListHeader}
-        onRefresh={() => void nearby.refetch()}
-        refreshing={nearby.isRefetching}
+        onRefresh={refetchGames}
+        refreshing={nearby.isRefetching || (fallbackActive && fallback.isRefetching)}
         showsVerticalScrollIndicator={false}
         removeClippedSubviews
         initialNumToRender={6}

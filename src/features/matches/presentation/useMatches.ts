@@ -203,6 +203,7 @@ export function useNearbyMatches(
   coords: Coords | null,
   sport: Sport | null,
   radiusM: number | null = DEFAULT_SEARCH_RADIUS_M,
+  enabled = true,
 ) {
   return useQuery({
     // radiusM is part of the key: without it, widening the search returned the
@@ -222,7 +223,7 @@ export function useNearbyMatches(
         radiusM: radiusM ?? null,
         sport,
       }),
-    enabled: true,
+    enabled,
   });
 }
 

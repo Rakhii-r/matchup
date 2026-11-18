@@ -130,8 +130,13 @@ export default function MatchCenter(): React.ReactNode {
               accessibilityState={{ selected: on }}
               accessibilityLabel={t.label}
             >
-              <t.Icon color={tint} size={20} />
-              <AppText variant="label" color={tint} style={{ fontSize: 15 }}>
+              <t.Icon color={tint} size={18} />
+              <AppText
+                variant="label"
+                color={tint}
+                style={{ fontSize: 14, flexShrink: 1 }}
+                numberOfLines={1}
+              >
                 {t.label}
               </AppText>
             </Pressable>
@@ -166,7 +171,10 @@ const makeStyles = (colors: AppColors) =>
     tab: {
       flex: 1,
       flexDirection: 'row',
-      gap: 8,
+      // Three tabs at gap 8 / 15pt pushed "Scorecard" onto two lines on a
+      // 360dp phone.
+      gap: 6,
+      paddingHorizontal: 6,
       minHeight: 52,
       alignItems: 'center',
       justifyContent: 'center',

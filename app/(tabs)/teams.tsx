@@ -252,7 +252,7 @@ export default function TeamsTab(): React.ReactNode {
                 </View>
               ) : null}
             </View>
-            <AppText variant="caption" color={M.muted} numberOfLines={1} style={{ fontSize: 13 }}>
+            <AppText variant="caption" color={M.muted} numberOfLines={2} style={{ fontSize: 13 }}>
               {activeChallenge
                 ? `${activeChallenge.match_name || 'Team Challenge'} · Tap to view radar`
                 : 'Discover nearby teams and challenge them'}
@@ -453,13 +453,20 @@ function TeamCard({
             {team.i_am_owner ? ' · Captain' : ''}
           </AppText>
         </View>
-        {/* Squad size against the declared format; just the size when there is none. */}
-        <View style={styles.sizePill}>
-          <IconUsers color={M.green} size={14} />
-          <AppText variant="caption" color={M.green} style={styles.pillText}>
-            {team.target_size ? `${team.player_count}/${team.target_size}` : team.player_count}
-          </AppText>
-        </View>
+        {/*
+          The team's format. It read "6/4" before -- 6 members over a 4-a-side
+          format looks like an over-full roster, but target_size is players per
+          SIDE and a squad may carry any number of subs. The member count is
+          already in the subtitle.
+        */}
+        {team.target_size ? (
+          <View style={styles.sizePill}>
+            <IconUsers color={M.green} size={14} />
+            <AppText variant="caption" color={M.green} style={styles.pillText}>
+              {`${team.target_size}v${team.target_size}`}
+            </AppText>
+          </View>
+        ) : null}
         <IconChevron color={M.text} size={18} />
       </View>
 

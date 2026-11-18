@@ -189,8 +189,11 @@ export function CourtSlotPickerSheet({
     setIsBookingModalVisible(false);
     setModalSlot(null);
     setSelectedSlot(null);
-    onBookingSuccess?.(booking);
     onClose();
+    // Both callers answer with an Alert. On iOS an Alert raised while these
+    // modals are still animating closed is dropped, so the booking saved with
+    // no confirmation at all. Wait for the dismiss before handing it over.
+    setTimeout(() => onBookingSuccess?.(booking), Platform.OS === 'ios' ? 600 : 0);
   };
 
   const handleConflictRecovery = () => {
@@ -418,24 +421,29 @@ export function CourtSlotPickerSheet({
             </View>
           </View>
         </View>
-      </Modal>
 
-      {/* Confirmation & Conflict Modal */}
-      {modalSlot && (
-        <BookingModal
-          visible={isBookingModalVisible}
-          onClose={handleCloseBookingModal}
-          onConflictRecovery={handleConflictRecovery}
-          venue={venue}
-          courtNumber={selectedCourt}
-          selectedDate={selectedDate}
-          slot={modalSlot}
-          matches={matches}
-          initialMatchId={initialMatchId}
-          timezone={timezone}
-          onBookingSuccess={handleBookingConfirmed}
-        />
-      )}
+        {/*
+          Confirmation & Conflict Modal. Rendered INSIDE the sheet's Modal, not
+          beside it: iOS presents a Modal from the topmost view controller, and
+          a sibling opened while this sheet is up is silently never shown --
+          "Book Slot" did nothing on iPhone while Android worked.
+        */}
+        {modalSlot && (
+          <BookingModal
+            visible={isBookingModalVisible}
+            onClose={handleCloseBookingModal}
+            onConflictRecovery={handleConflictRecovery}
+            venue={venue}
+            courtNumber={selectedCourt}
+            selectedDate={selectedDate}
+            slot={modalSlot}
+            matches={matches}
+            initialMatchId={initialMatchId}
+            timezone={timezone}
+            onBookingSuccess={handleBookingConfirmed}
+          />
+        )}
+      </Modal>
     </>
   );
 }

@@ -177,6 +177,16 @@ export default function DirectChallengeScreen(): React.ReactNode {
     return list;
   }, [stripFrom]);
 
+  /*
+    A team plays its declared format and only that one: the server refuses a
+    fixture whose total_slots / 2 differs from the team's target_size
+    (team_format_matches). So only that tile is selectable, and it is the
+    default. A team with no format can pick none; the server would refuse it.
+  */
+  const teamFormatSlots = activeTeam?.target_size != null ? activeTeam.target_size * 2 : null;
+  // Derived, not synced by an effect: the team's format wins whenever it has one.
+  const effectiveSlots = teamFormatSlots ?? totalSlots;
+
   const createChallenge = useCreateChallenge(selectedTeamId || activeTeam?.id || '');
 
   const handleSendChallenge = async () => {
@@ -188,13 +198,28 @@ export default function DirectChallengeScreen(): React.ReactNode {
     setFormError(null);
     const codeCleaned = opponentCode.trim().toUpperCase();
 
+    // The server refuses this too (SELF_CHALLENGE); saying so here spares the
+    // round trip and names the actual problem before anything is sent.
+    if (activeTeam && codeCleaned === activeTeam.invite_code.toUpperCase()) {
+      const msg = "That's your own team's code. You can't challenge your own team.";
+      setFormError(msg);
+      Alert.alert('Wrong code', msg);
+      return;
+    }
+    if (teamFormatSlots == null) {
+      const msg = `${activeTeam?.name ?? 'This team'} has no match format set. Set one on the team page first.`;
+      setFormError(msg);
+      Alert.alert('No team format', msg);
+      return;
+    }
+
     const parsed = CreateChallengeSchema.safeParse({
       opponentCode: codeCleaned,
       matchName: matchName.trim() || `${activeTeam?.name ?? 'Squad'} Challenge`,
       venueId,
       dayOffset,
       timeHHmm,
-      totalSlots,
+      totalSlots: effectiveSlots,
       message: message.trim() || undefined,
     });
 
@@ -327,13 +352,20 @@ export default function DirectChallengeScreen(): React.ReactNode {
         </AppText>
         <View style={styles.formatRow}>
           {FORMAT_OPTIONS.map((f) => {
-            const active = totalSlots === f.slots;
+            const active = effectiveSlots === f.slots;
+            const allowed = teamFormatSlots === f.slots;
             return (
               <Pressable
                 key={f.label}
                 onPress={() => setTotalSlots(f.slots)}
-                style={[styles.formatBtn, active && styles.formatBtnActive]}
+                disabled={!allowed}
+                style={[
+                  styles.formatBtn,
+                  active && styles.formatBtnActive,
+                  !allowed && styles.formatBtnDisabled,
+                ]}
                 accessibilityRole="button"
+                accessibilityState={{ disabled: !allowed, selected: active }}
               >
                 <AppText
                   variant="label"
@@ -353,6 +385,11 @@ export default function DirectChallengeScreen(): React.ReactNode {
             );
           })}
         </View>
+        <AppText variant="caption" color={colors.textMuted} style={{ marginTop: 4 }}>
+          {teamFormatSlots != null
+            ? `${activeTeam?.name ?? 'Your team'} plays ${teamFormatSlots / 2}v${teamFormatSlots / 2}, so only that format can be challenged.`
+            : 'Set your team’s format on the team page to send a challenge.'}
+        </AppText>
       </View>
 
       {/* 5. Date Selector */}
@@ -593,6 +630,7 @@ const makeStyles = (colors: AppColors) =>
     chipRow: {
       gap: spacing.sm,
       paddingVertical: 4,
+      paddingHorizontal: 2,
     },
     teamChip: {
       paddingHorizontal: spacing.md,
@@ -629,14 +667,15 @@ const makeStyles = (colors: AppColors) =>
       paddingHorizontal: spacing.md,
       paddingVertical: spacing.sm,
     },
+    // All five tiles on one row. minWidth 58 + gaps overflowed a 360dp
+    // screen and wrapped 8v8 onto a line of its own.
     formatRow: {
       flexDirection: 'row',
-      gap: spacing.sm,
-      flexWrap: 'wrap',
+      gap: 6,
     },
     formatBtn: {
       flex: 1,
-      minWidth: 58,
+      minWidth: 0,
       paddingVertical: spacing.sm,
       alignItems: 'center',
       justifyContent: 'center',
@@ -649,6 +688,9 @@ const makeStyles = (colors: AppColors) =>
     formatBtnActive: {
       backgroundColor: colors.primary,
       borderColor: colors.primary,
+    },
+    formatBtnDisabled: {
+      opacity: 0.35,
     },
     dateChip: {
       paddingHorizontal: spacing.md,

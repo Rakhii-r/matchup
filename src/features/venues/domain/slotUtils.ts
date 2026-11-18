@@ -222,9 +222,11 @@ export function getSlotStatus(slot: VenueSlot): SlotState {
   if (slot.bookingId !== null) {
     return 'booked';
   }
+  // Past once it has STARTED, not once it has ended: at 11:12 the 11:00 slot is
+  // already a quarter gone and must not be bookable.
   const now = new Date();
-  const end = new Date(slot.endTime);
-  if (!isNaN(end.getTime()) && end.getTime() <= now.getTime()) {
+  const start = new Date(slot.startTime);
+  if (!isNaN(start.getTime()) && start.getTime() <= now.getTime()) {
     return 'past';
   }
   return 'available';

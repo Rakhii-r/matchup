@@ -60,19 +60,38 @@ function formatWhen(iso: string): string {
   });
 }
 
-function getMatchCategory(m: Match): 'searching' | 'upcoming' | 'live' | 'completed' | 'cancelled' {
+/**
+ * Which tab a game belongs on.
+ *
+ * Live means "now is inside the booked slot", not "a round is in progress".
+ * A slot booked 3-4pm stays Live between rounds, so the latest round of a
+ * series stays Live after it completes while its slot is still running
+ * (`isLatestRound`); earlier rounds of that series read as completed so the
+ * slot is not listed once per round.
+ *
+ * An open-for-all game (match_type 'open') sits in status 'open' until its
+ * toss, so it is placed by its clock like any other. Only a team fixture still
+ * waiting on an opponent is 'searching'.
+ */
+function getMatchCategory(
+  m: Match,
+  isLatestRound = true,
+): 'searching' | 'upcoming' | 'live' | 'completed' | 'cancelled' {
   if (m.status === 'cancelled') return 'cancelled';
   // Its time ran out with no result. Not 'cancelled' (nobody called it off) and
   // not 'live' -- the clock below would otherwise still read it as in progress.
   if (m.status === 'expired') return 'completed';
-  if (m.status === 'completed') return 'completed';
-  if (m.status === 'open') return 'searching';
+  if (m.status === 'open' && m.match_type !== 'open') return 'searching';
 
   const scheduledMs = Date.parse(m.scheduled_at);
   const nowMs = Date.now();
   const endMs = m.end_time ? Date.parse(m.end_time) : scheduledMs + 3 * 60 * 60 * 1000;
+  const slotRunning = nowMs >= scheduledMs && nowMs <= endMs;
 
-  if (nowMs >= scheduledMs && nowMs <= endMs) return 'live';
+  if (m.status === 'completed') {
+    return slotRunning && isLatestRound && m.end_time ? 'live' : 'completed';
+  }
+  if (slotRunning) return 'live';
   if (scheduledMs > nowMs) return 'upcoming';
   return 'completed';
 }
@@ -98,6 +117,7 @@ function statusTone(category: Category, M: MockPalette): { bg: string; color: st
 function MatchCard({
   match,
   myRole,
+  isLatestRound,
   cancelling,
   onPress,
   onOpenRadar,
@@ -105,6 +125,7 @@ function MatchCard({
 }: {
   match: Match;
   myRole: 'creator' | 'player';
+  isLatestRound: boolean;
   cancelling?: boolean;
   onPress: () => void;
   onOpenRadar?: (challengeId: string) => void;
@@ -112,7 +133,7 @@ function MatchCard({
 }): React.ReactNode {
   const M = useMock();
   const styles = useMemo(() => makeStyles(M), [M]);
-  const category = getMatchCategory(match);
+  const category = getMatchCategory(match, isLatestRound);
   const badge = { ...statusTone(category, M), label: STATUS_LABEL[category] };
   const isCancelled = match.status === 'cancelled';
   const isCompleted = match.status === 'completed';
@@ -184,7 +205,7 @@ function MatchCard({
               View Live Radar
             </AppText>
           </Pressable>
-        ) : (
+        ) : isCancelled ? null : (
           <Pressable
             onPress={onPress}
             style={[styles.btn, styles.btnPrimary]}
@@ -196,7 +217,13 @@ function MatchCard({
           </Pressable>
         )}
 
-        {myRole === 'creator' && !isCancelled && !isCompleted ? (
+        {/*
+          Only a game that can still happen can be cancelled: not one that is
+          over, expired, or whose slot has already passed unplayed.
+        */}
+        {myRole === 'creator' &&
+        (match.status === 'open' || match.status === 'locked') &&
+        category !== 'completed' ? (
           <Pressable
             onPress={() => onCancel(match)}
             disabled={cancelling}
@@ -312,23 +339,34 @@ export default function BookedMatchesScreen(): React.ReactNode {
     );
   }, [challenges.data]);
 
+  /** The newest round of each series (rounds share `rematch_of` = the first game's id). */
+  const latestRoundIds = useMemo(() => {
+    const newest = new Map<string, Match>();
+    for (const { match } of rawList) {
+      const root = match.rematch_of ?? match.id;
+      const seen = newest.get(root);
+      if (!seen || Date.parse(match.created_at) > Date.parse(seen.created_at)) newest.set(root, match);
+    }
+    return new Set(Array.from(newest.values(), (m) => m.id));
+  }, [rawList]);
+
   const filteredList = useMemo(() => {
     return rawList.filter((item) => {
-      const category = getMatchCategory(item.match);
+      const category = getMatchCategory(item.match, latestRoundIds.has(item.match.id));
       if (tab === 'upcoming') return category === 'upcoming';
       if (tab === 'live') return category === 'live';
       if (tab === 'completed') return category === 'completed';
       return true; // 'all'
     });
-  }, [rawList, tab]);
+  }, [rawList, tab, latestRoundIds]);
 
   const showOpenChallenges = (tab === 'upcoming' || tab === 'all') && activeChallenges.length > 0;
   const upcomingCount = useMemo(() => {
     return (
-      rawList.filter((i) => getMatchCategory(i.match) === 'upcoming').length +
-      activeChallenges.length
+      rawList.filter((i) => getMatchCategory(i.match, latestRoundIds.has(i.match.id)) === 'upcoming')
+        .length + activeChallenges.length
     );
-  }, [rawList, activeChallenges.length]);
+  }, [rawList, activeChallenges.length, latestRoundIds]);
 
   const cancelMatch = useCancelMatch();
 
@@ -492,6 +530,7 @@ export default function BookedMatchesScreen(): React.ReactNode {
             <MatchCard
               match={item.match}
               myRole={item.myRole}
+              isLatestRound={latestRoundIds.has(item.match.id)}
               cancelling={cancellingId === item.match.id}
               onPress={() => {
                 if (item.match.status === 'completed') router.push(`/match/${item.match.id}/result`);

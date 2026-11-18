@@ -356,6 +356,11 @@ makes the split safe. An open match has `team_a_id`, `team_b_id` and
   `PLAYER_SCHEDULE_CONFLICT|<startIso>|<endIso>|<name>` so the message can name
   the fixture that actually clashes; `@shared/utils/scheduleConflict` parses
   that for both repositories.
+- **Empty radius falls back to all (5 Nov 2026).** On the Matches tab, when
+  location is known, a distance chip is set and nothing is inside it, the
+  screen re-queries `nearby_matches` with radius 0 (no distance filter,
+  nearest first) and labels the list "showing all". Players outside a covered
+  city, and Play Store reviewers abroad, never land on an empty screen.
 - `nearby_matches` now honours `matches.search_radius_m`. Before this the
   Search Distance chips were stored and never read. `finalise_challenge` does
   not copy the radius onto the match it creates, so it is null on every team
@@ -402,8 +407,11 @@ which ones are blocked by dependencies rather than effort.
 
 - Legal ball = `extra_type IS NULL OR IN ('bye','leg_bye')`. Wides and no-balls
   are re-bowled and never advance the over.
-- `extra_runs` is the TOTAL for that ball including the penalty. A plain wide
-  is 1; a wide run away for four is 5.
+- A ball's total is `runs_off_bat + extra_runs`, so a run belongs in exactly one.
+  A plain wide is bat 0, extra 1; a wide run away for four is bat 0, extra 5. A
+  no-ball hit for six is bat 6, extra 1. `record_delivery` normalises to this
+  whatever the client sends: the keypad puts the runs in both, which used to count
+  them twice (fix: `20261031090000_fix_extras_double_counting.sql`).
 - Balls faced excludes wides only — a no-ball is a ball the batter faced.
 - Bowler economy excludes byes and leg byes, includes wides and no-balls. A
   run-out is not the bowler's wicket.
@@ -412,8 +420,12 @@ which ones are blocked by dependencies rather than effort.
   undo is exact rather than a reversal that can drift.
 - **Ending the match is TWO calls.** `end_innings` only sets that innings row to
   `completed`; it never touches `matches`. `finish_match` is what compares the
-  two innings, writes `matches.status = 'completed'` and phrases `result_text`
-  ("… won by 12 runs" / "… won by N wickets" / "Match tied"). A second innings
+  two innings, writes `matches.status = 'completed'` AND `winner_team_id`
+  (13 Nov 2026 — before that it was never set, so a series tally counted
+  every round as a draw), and phrases `result_text` ("Side A won by 12 runs"
+  / "… won by N wickets" / "Game tied"). An open match's toss-time sides are
+  named via `match_side_label` ("Side A"), never the full shell-team name;
+  the client trims the same way with `sideName()`. A second innings
   ended without `finish_match` leaves the fixture in progress with no winner and
   every read model that keys off status empty — that was the shipped bug. Both
   calls sit behind one `ending` flag in `app/match/[id]/score.tsx`; when the
@@ -427,6 +439,30 @@ which ones are blocked by dependencies rather than effort.
   first innings' total is read as `target - 1` (start_innings writes innings 2's
   target as the closed first innings' runs + 1) and its wickets are the one
   figure no read model exposes.
+
+## Tester fixes (13 Nov 2026)
+
+- **Toss notices go out once.** `perform_toss`/`redo_toss` skip the caller
+  (`owner_id <> v_uid`) and `redo_toss` deletes the still-queued `toss_ready`
+  jobs for that match. `set_toss_decision` clears them too and sends one
+  `toss_done` ("Side A chose to bat first") to everyone confirmed but the caller.
+- **Expiry runs every minute** (`expire-stale-matches` cron `* * * * *`), so a
+  slot that ended reads expired within a minute rather than up to 15.
+- **A slot is past once it STARTS**, on both sides: `book_venue_slot` raises
+  `CANNOT_BOOK_PAST` when `in_start_time <= now()` and `getSlotStatus` marks it
+  `past` the same way. At 11:12 the 11:00 slot is no longer bookable.
+- **Games tab placement** (`app/teams/matches.tsx`, `getMatchCategory`): Live
+  means the clock is inside the booked slot. An open-for-all game is placed by
+  its clock even in status `open`; only a team fixture awaiting an opponent is
+  "searching". The newest round of a series stays Live after completing while
+  its slot runs; earlier rounds read completed. Cancel shows only for an
+  `open`/`locked` game that is not over; a cancelled card has no Open button.
+- **Home Featured Venues show only real data**: rating, price, address and
+  distance render when the column has a value, and nothing is invented. With a
+  home location the rail is venues within 50 km, nearest first.
+- **Direct challenge** (`app/teams/challenge.tsx`) allows only the team's
+  declared format and refuses its own invite code before calling the server.
+- The Teams-tab pill shows the format (`6v6`), not `members/target_size`.
 
 ## NOT built yet
 

@@ -14,7 +14,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { Stack, useRouter } from 'expo-router';
 
 import { AppError } from '@core/errors/AppError';
-import { useSportLabel } from '@features/sports/presentation/useSports';
+import { useActiveSports, useSportLabel } from '@features/sports/presentation/useSports';
 import { CreateTeamSchema } from '@features/teams/domain/teamSchema';
 import { useCreateTeam } from '@features/teams/presentation/useTeams';
 import type { Sport } from '@shared/types/database.types';
@@ -35,7 +35,6 @@ import {
 } from '@shared/ui/icons';
 import { PressableScale } from '@shared/ui/PressableScale';
 
-const SPORTS: Sport[] = ['box_cricket', 'badminton'];
 const NAME_MAX = 50;
 // The same ceiling CreateTeamSchema enforces, so the counter never lies.
 const DESCRIPTION_MAX = 500;
@@ -47,6 +46,9 @@ export default function CreateTeamScreen(): React.ReactNode {
   const router = useRouter();
   const createTeam = useCreateTeam();
   const sportLabel = useSportLabel();
+  // Only sports switched on in Sports Management; a hidden one cannot be picked.
+  const activeSports = useActiveSports();
+  const sportOptions: Sport[] = (activeSports.data ?? []).map((s) => s.sport);
   const [name, setName] = useState('');
   const [sport, setSport] = useState<Sport>('box_cricket');
   const [error, setError] = useState<string | null>(null);
@@ -232,7 +234,7 @@ export default function CreateTeamScreen(): React.ReactNode {
             </View>
           </View>
           <View style={styles.sportRow}>
-            {SPORTS.map((value) => {
+            {sportOptions.map((value) => {
               const on = sport === value;
               return (
                 <Pressable

@@ -539,7 +539,10 @@ export default function MatchDetailScreen(): React.ReactNode {
 
       <View style={styles.card}>
         <View style={styles.cardHead}>
-          <AppText variant="heading">{data.match_name}</AppText>
+          {/* flex: 1 lets a long name wrap instead of pushing the badge off the card. */}
+          <AppText variant="heading" style={{ flex: 1, marginRight: spacing.sm }}>
+            {data.match_name}
+          </AppText>
           <View style={[styles.badge, { backgroundColor: STATUS_COLOR(colors)[data.status] }]}>
             <AppText variant="caption" color={colors.textInverse}>
               {data.status}

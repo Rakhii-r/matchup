@@ -180,8 +180,9 @@ export default function MyBookingsScreen(): React.ReactNode {
             accessibilityRole="button"
             accessibilityLabel="Get Directions"
           >
-            <IconDirections size={16} color={M.limeInk} />
-            <AppText variant="caption" color={M.limeInk} style={styles.directionsBtnText}>
+            {/* limeInk is ink for text ON the green fill; on this cardHi button it vanished in dark mode. */}
+            <IconDirections size={16} color={M.green} />
+            <AppText variant="caption" color={M.green} style={styles.directionsBtnText}>
               Get Directions
             </AppText>
           </Pressable>
@@ -337,7 +338,7 @@ const makeStyles = (M: MockPalette) =>
     statusBadgeCancelled: { backgroundColor: M.cardHi },
     statusBadgePast: { backgroundColor: M.cardHi },
     metaRow: { flexDirection: 'row', alignItems: 'center', gap: S.xs, marginTop: 2 },
-    metaText: { fontSize: 13 },
+    metaText: { fontSize: 13, flexShrink: 1 },
     actionsRow: {
       marginTop: S.sm,
       paddingTop: S.sm,

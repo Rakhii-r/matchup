@@ -8,6 +8,7 @@ import { useRouter } from 'expo-router';
 import { authRepository } from '@features/auth/data/authRepository';
 import { getCurrentCoords } from '@core/location/location';
 import { useCreateProfile } from '@features/profile/presentation/useCreateProfile';
+import { useActiveSports } from '@features/sports/presentation/useSports';
 import { R, S, useMock, type MockPalette } from '@shared/theme/mockTheme';
 import { AppLogo } from '@shared/ui/AppLogo';
 import { AppText } from '@shared/ui/AppText';
@@ -46,6 +47,11 @@ export default function CreateProfileScreen(): React.ReactNode {
   const [name, setName] = useState('');
   const [areaName, setAreaName] = useState('');
   const [sports, setSports] = useState<SportKey[]>(['cricket']);
+  // Only sports switched on in Sports Management are offered at sign-up.
+  const activeSports = useActiveSports();
+  const visibleSports = SPORTS.filter(
+    (s) => !activeSports.data || activeSports.data.some((a) => a.sport === SPORT_KEY_TO_DB[s.key]),
+  );
   const [skill, setSkill] = useState<Skill>('Intermediate');
   const [avatarUri, setAvatarUri] = useState<string | null>(null);
   const [avatarBase64, setAvatarBase64] = useState<string | null>(null);
@@ -153,7 +159,7 @@ export default function CreateProfileScreen(): React.ReactNode {
           Sport Preference
         </AppText>
         <View style={styles.sportRow}>
-          {SPORTS.map(({ key, label, Icon, colors, img }) => {
+          {visibleSports.map(({ key, label, Icon, colors, img }) => {
             const on = sports.includes(key);
             return (
               <Pressable

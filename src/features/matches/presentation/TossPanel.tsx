@@ -289,18 +289,19 @@ export function TossPanel({ matchId, onProceed }: TossPanelProps): React.ReactNo
                           source={c.image}
                           style={[styles.callCoin, on ? null : styles.callCoinOff]}
                         />
+                        {/*
+                          No separate radio circle: the border, tint and full-colour
+                          coin already mark the selection, and the 22px circle left
+                          "HEADS" ~33px on a phone, wrapping it onto two lines.
+                        */}
                         <AppText
                           variant="label"
                           color={on ? colors.primary : colors.text}
                           style={styles.callLabel}
+                          numberOfLines={1}
                         >
                           {c.label}
                         </AppText>
-                        <View style={[styles.radio, on ? styles.radioOn : null]}>
-                          {on ? (
-                            <IconCheck color={colors.textInverse} size={12} strokeWidth={3} />
-                          ) : null}
-                        </View>
                       </Pressable>
                     );
                   })}
@@ -682,16 +683,6 @@ const makeStyles = (colors: AppColors) =>
       fontWeight: '700',
       fontSize: 16,
     },
-    radio: {
-      width: 22,
-      height: 22,
-      borderRadius: 11,
-      borderWidth: 1.5,
-      borderColor: colors.border,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    radioOn: { backgroundColor: colors.primary, borderColor: colors.primary },
     // Three to a row; six options make two tidy rows on any phone width.
     oversRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
     oversChip: {

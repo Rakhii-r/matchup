@@ -14,6 +14,7 @@
 import { useMemo } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
+import { sideName } from '@features/matches/domain/sideName';
 import { SlotBadge } from '@features/matches/presentation/SlotBadge';
 import { useMatch, useMatchSides } from '@features/matches/presentation/useMatches';
 import { useSlotCountdown } from '@features/matches/presentation/useSlotCountdown';
@@ -48,8 +49,8 @@ export function ScorecardPanel({ matchId }: ScorecardPanelProps): React.ReactNod
   const teamName = useMemo(() => {
     const sd = sides.data;
     return (teamId: string): string => {
-      if (sd?.team_a_id === teamId) return sd.team_a_name ?? 'Team A';
-      if (sd?.team_b_id === teamId) return sd.team_b_name ?? 'Team B';
+      if (sd?.team_a_id === teamId) return sideName(sd.team_a_name) ?? 'Team A';
+      if (sd?.team_b_id === teamId) return sideName(sd.team_b_name) ?? 'Team B';
       return 'Team';
     };
   }, [sides.data]);
@@ -65,12 +66,23 @@ export function ScorecardPanel({ matchId }: ScorecardPanelProps): React.ReactNod
   const rows = innings.data ?? [];
 
   if (rows.length === 0) {
+    const status = match.data?.status;
+    const why =
+      status === 'cancelled'
+        ? 'This game was cancelled before a ball was bowled.'
+        : status === 'expired'
+          ? 'The slot ended before a ball was bowled.'
+          : 'Innings 1 hasn’t started yet. Totals appear here ball by ball once the scorer begins.';
     return (
-      <>
-        <View style={styles.card}>
-          <AppText muted>No scoring yet for this game.</AppText>
-        </View>
-      </>
+      <View style={[styles.card, styles.emptyCard]}>
+        <IconTile size={52}>
+          <IconCricket color={colors.primary} size={26} />
+        </IconTile>
+        <AppText variant="label">No scoring yet</AppText>
+        <AppText variant="caption" muted style={styles.emptyText}>
+          {why}
+        </AppText>
+      </View>
     );
   }
 
@@ -149,6 +161,8 @@ const makeStyles = (colors: AppColors) =>
       borderColor: colors.border,
       marginBottom: spacing.md,
     },
+    emptyCard: { alignItems: 'center', paddingVertical: spacing.xl },
+    emptyText: { textAlign: 'center' },
     // The green spine marks an innings card apart from a notice card.
     innings: { borderLeftWidth: 4, borderLeftColor: colors.primary },
     result: { backgroundColor: colors.primary, borderColor: colors.primary },

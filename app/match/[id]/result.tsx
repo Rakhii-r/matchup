@@ -27,6 +27,7 @@ import {
   useRematch,
 } from '@features/matches/presentation/useMatches';
 import { useSlotCountdown } from '@features/matches/presentation/useSlotCountdown';
+import { sideName } from '@features/matches/domain/sideName';
 import { useMyVenueRating, useRateVenue } from '@features/venues/presentation/useVenues';
 import { useLiveState, useMatchInnings, useSetMotm } from '@features/scoring/presentation/useScoring';
 import { formatOvers } from '@features/scoring/domain/scoringSchema';
@@ -82,8 +83,8 @@ export default function MatchResultScreen(): React.ReactNode {
   const teamName = useMemo(() => {
     const sd = sides.data;
     return (teamId: string): string => {
-      if (sd?.team_a_id === teamId) return sd.team_a_name ?? 'Team A';
-      if (sd?.team_b_id === teamId) return sd.team_b_name ?? 'Team B';
+      if (sd?.team_a_id === teamId) return sideName(sd.team_a_name) ?? 'Team A';
+      if (sd?.team_b_id === teamId) return sideName(sd.team_b_name) ?? 'Team B';
       return 'Team';
     };
   }, [sides.data]);
@@ -422,7 +423,7 @@ export default function MatchResultScreen(): React.ReactNode {
 
             <View style={styles.seriesScoreRow}>
               <AppText variant="caption" color={M.muted} numberOfLines={1} style={{ flex: 1 }}>
-                {sides.data?.team_a_name ?? 'Side A'}
+                {sideName(sides.data?.team_a_name) ?? 'Side A'}
               </AppText>
               <AppText variant="heading" color={M.green} style={{ fontSize: 20 }}>
                 {seriesScore.a} — {seriesScore.b}
@@ -433,7 +434,7 @@ export default function MatchResultScreen(): React.ReactNode {
                 numberOfLines={1}
                 style={{ flex: 1, textAlign: 'right' }}
               >
-                {sides.data?.team_b_name ?? 'Side B'}
+                {sideName(sides.data?.team_b_name) ?? 'Side B'}
               </AppText>
             </View>
 
@@ -456,12 +457,12 @@ export default function MatchResultScreen(): React.ReactNode {
                 <AppText variant="caption" color={M.muted}>
                   {g.status === 'completed'
                     ? g.team_a_runs !== null || g.team_b_runs !== null
-                      ? `${g.team_a_runs ?? 0}/${g.team_a_wickets ?? 0} v ${g.team_b_runs ?? 0}/${g.team_b_wickets ?? 0}`
+                      ? `${g.team_a_runs ?? 0}/${g.team_a_wickets ?? 0} vs ${g.team_b_runs ?? 0}/${g.team_b_wickets ?? 0}`
                       : 'No score recorded'
                     : g.status === 'cancelled'
                       ? 'Cancelled'
                       : g.status === 'expired'
-                        ? 'Time up'
+                        ? 'No result · slot ended'
                         : 'In progress'}
                 </AppText>
               </Pressable>
@@ -697,11 +698,9 @@ export default function MatchResultScreen(): React.ReactNode {
             leaving a dead control for people to press.
           */
           <View style={styles.expiredBox}>
-            <AppText variant="label" color={M.danger} center>
-              Slot time ended
-            </AppText>
+            {/* The slot bar at the top already says when it ended; this only says what to do. */}
             <AppText variant="caption" color={M.muted} center>
-              Your booked time expired at {slot.endsAtLabel}. Book another slot to keep playing.
+              Book another slot to keep playing.
             </AppText>
           </View>
         ) : null}
