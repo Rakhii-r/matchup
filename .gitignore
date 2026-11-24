@@ -47,3 +47,7 @@ Thumbs.db
 # Supabase local
 supabase/.branches/
 supabase/.temp/
+
+# Built/downloaded app binaries are too big for GitHub (100 MB limit)
+*.apk
+*.aab
