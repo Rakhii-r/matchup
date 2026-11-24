@@ -1,0 +1,31 @@
+appId: com.asrdigi.matchup
+name: Create game wizard (stops before posting)
+---
+- launchApp
+- tapOn: "Create a Game"
+- assertVisible: "Step 1 of 3"
+- assertVisible: "MATCH TYPE"
+- tapOn: "Box Cricket"
+- tapOn: "Post a Game"
+- tapOn: "Next.*"
+- extendedWaitUntil:
+    visible: "Step 2 of 3"
+    timeout: 10000
+- takeScreenshot: shots/03_step2
+- tapOn: "Next.*"
+- extendedWaitUntil:
+    visible: "Step 3 of 3"
+    timeout: 10000
+- takeScreenshot: shots/03_step3
+# Match length: whole hours only
+- scrollUntilVisible:
+    element: "3 hrs"
+    direction: DOWN
+- assertVisible: "1 hr"
+- assertVisible: "2 hrs"
+- assertNotVisible: "1.5 hrs"
+- takeScreenshot: shots/03_step3_duration
+# Leave without posting
+- back
+- back
+- back

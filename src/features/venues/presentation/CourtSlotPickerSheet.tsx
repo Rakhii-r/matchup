@@ -16,11 +16,13 @@ import {
   formatCourtLabel,
   formatDateIso,
   formatSlotWindow,
+  getSlotStatus,
 } from '@features/venues/domain/slotUtils';
 import type {
   VenueBooking,
   VenueSlot,
 } from '@features/venues/domain/venueBookingSchema';
+import { useLightCourts } from '@features/lights/presentation/useLights';
 import { BookingModal } from '@features/venues/presentation/BookingModal';
 import { CourtPicker } from '@features/venues/presentation/CourtPicker';
 import { DateStrip } from '@features/venues/presentation/DateStrip';
@@ -62,6 +64,9 @@ export interface CourtSlotPickerSheetProps {
   venue: CourtSlotPickerVenue | null;
   initialDate?: string; // YYYY-MM-DD
   initialCourt?: number;
+  /** The match's own start (ISO) and length, so the sheet opens on its slot. */
+  initialStartTime?: string;
+  initialDurationMinutes?: number;
   matches?: Array<{
     id: string;
     title?: string;
@@ -74,11 +79,10 @@ export interface CourtSlotPickerSheetProps {
   style?: StyleProp<ViewStyle>;
 }
 
+// Whole hours only (20261123120000_hourly_bookings_only.sql).
 const DURATION_OPTIONS = [
   { minutes: 60, label: '1 hr' },
-  { minutes: 90, label: '1.5 hrs' },
   { minutes: 120, label: '2 hrs' },
-  { minutes: 150, label: '2.5 hrs' },
   { minutes: 180, label: '3 hrs' },
 ];
 
@@ -93,6 +97,8 @@ export function CourtSlotPickerSheet({
   venue,
   initialDate,
   initialCourt = 1,
+  initialStartTime,
+  initialDurationMinutes,
   matches,
   initialMatchId = null,
   onBookingSuccess,
@@ -104,6 +110,20 @@ export function CourtSlotPickerSheet({
   const sheetInsets = useSheetInsets();
   const styles = useMemo(() => makeStyles(M), [M]);
 
+  // Court numbers at this venue that have court lights.
+  const lightCourts = useLightCourts();
+  const venueId = venue?.id;
+  const venueCourts = venue?.courts_count;
+  const litCourts = useMemo(() => {
+    const set = new Set<number>();
+    if (!venueId) return set;
+    const total = Math.max(1, venueCourts ?? 1);
+    for (let c = 1; c <= total; c += 1) {
+      if (lightCourts.data?.courts.has(`${venueId}:${c}`)) set.add(c);
+    }
+    return set;
+  }, [lightCourts.data, venueId, venueCourts]);
+
   // Lazily, so "today" is not computed during render. It is re-derived every
   // time the sheet opens (below) because the sheet stays MOUNTED between opens:
   // a value frozen at first mount shows yesterday to anyone who left the app
@@ -112,8 +132,14 @@ export function CourtSlotPickerSheet({
     () => initialDate ?? formatDateIso(new Date()),
   );
   const [selectedCourt, setSelectedCourt] = useState<number>(initialCourt);
-  const [durationMinutes, setDurationMinutes] = useState<number>(60);
-  const [selectedSlot, setSelectedSlot] = useState<VenueSlot | null>(null);
+  const [durationMinutes, setDurationMinutes] = useState<number>(initialDurationMinutes ?? 60);
+  const [pickedSlot, setPickedSlot] = useState<VenueSlot | null>(null);
+  // The match's start, pre-selected until the user picks anything themselves.
+  const [pendingStart, setPendingStart] = useState<string | null>(initialStartTime ?? null);
+  const setSelectedSlot = (slot: VenueSlot | null) => {
+    setPickedSlot(slot);
+    setPendingStart(null);
+  };
   const [modalSlot, setModalSlot] = useState<VenueSlot | null>(null);
   const [isBookingModalVisible, setIsBookingModalVisible] = useState(false);
 
@@ -122,11 +148,13 @@ export function CourtSlotPickerSheet({
     if (visible) {
       setSelectedDate(initialDate ?? formatDateIso(new Date()));
       if (initialCourt) setSelectedCourt(initialCourt);
-      setSelectedSlot(null);
+      setDurationMinutes(initialDurationMinutes ?? 60);
+      setPickedSlot(null);
+      setPendingStart(initialStartTime ?? null);
       setModalSlot(null);
       setIsBookingModalVisible(false);
     }
-  }, [visible, initialDate, initialCourt]);
+  }, [visible, initialDate, initialCourt, initialDurationMinutes, initialStartTime]);
 
   // Fetch slots for selected date & venue
   const slotsQuery = useVenueSlots(venue?.id, selectedDate, timezone);
@@ -136,6 +164,17 @@ export function CourtSlotPickerSheet({
     if (!slotsQuery.data) return [];
     return slotsQuery.data.filter((s) => s.courtNumber === selectedCourt);
   }, [slotsQuery.data, selectedCourt]);
+
+  const preselected = useMemo(() => {
+    if (!pendingStart) return null;
+    const want = new Date(pendingStart).getTime();
+    return (
+      courtSlots.find(
+        (s) => new Date(s.startTime).getTime() === want && getSlotStatus(s) === 'available',
+      ) ?? null
+    );
+  }, [courtSlots, pendingStart]);
+  const selectedSlot = pickedSlot ?? preselected;
 
   // Synchronize selectedSlot with refetched slot data (e.g. after a conflict occurs).
   // If the slot is no longer available, automatically clear selectedSlot so it is not highlighted.
@@ -307,6 +346,7 @@ export function CourtSlotPickerSheet({
                 selectedCourt={selectedCourt}
                 onSelectCourt={handleSelectCourt}
                 sportTypes={venue.sport_types}
+                litCourts={litCourts}
               />
 
               {/* 3. Duration Selector */}
@@ -435,6 +475,7 @@ export function CourtSlotPickerSheet({
             onConflictRecovery={handleConflictRecovery}
             venue={venue}
             courtNumber={selectedCourt}
+            courtHasLights={litCourts.has(selectedCourt)}
             selectedDate={selectedDate}
             slot={modalSlot}
             matches={matches}

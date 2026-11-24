@@ -22,6 +22,7 @@ importantly — which ones are **blocked by a dependency rather than by effort**
 | 5 | Profile with performance, match history and grade | Not started | **FR-206 + FR-207**, Phase 2 |
 | 6a | In-app toss | Not started | **FR-204**, Phase 2 |
 | 6b | Ball-by-ball + individual scores (CricHeroes-style) | Not started | **FR-301**, Phase 3 |
+| 7 | Paid court lights: 4 / 6 / wicket blinks the box via ThingsBoard | **Built** (18 Nov), awaiting first real blink | `docs/PHASE2_LIGHTS_DESIGN.md` (owner's "phase 2") |
 
 Goals 4, 5 and 6 are Phase 2 and Phase 3 work. `CLAUDE.md` lists the matching
 engine and the computed reliability score under "NOT in Phase 1".

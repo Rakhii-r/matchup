@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { View } from 'react-native';
-import { Stack, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 
 import { AppError } from '@core/errors/AppError';
 import { useJoinByCode } from '@features/matches/presentation/useMatches';
@@ -16,7 +16,12 @@ export default function JoinMatchScreen(): React.ReactNode {
   const router = useRouter();
   const { colors } = useTheme();
   const joinByCode = useJoinByCode();
-  const [code, setCode] = useState('');
+  // A shared invite link opens sixfour24://match/join?code=ABC123 with the code
+  // filled in; the player still taps Join, so nothing happens without them.
+  const params = useLocalSearchParams<{ code?: string }>();
+  const [code, setCode] = useState(() =>
+    typeof params.code === 'string' ? params.code.toUpperCase().slice(0, 6) : '',
+  );
   const [error, setError] = useState<string | null>(null);
 
   const onSubmit = async (): Promise<void> => {

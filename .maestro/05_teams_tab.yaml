@@ -1,0 +1,24 @@
+appId: com.asrdigi.matchup
+name: Teams tab
+---
+- launchApp
+- tapOn: "Teams"
+- assertVisible: "Build. Play. Grow Together."
+- assertVisible: "Find Opponent.*"
+- assertVisible: "MY TEAMS.*"
+- tapOn: "Join with Code"
+- waitForAnimationToEnd
+- assertVisible: "Join a team"
+- takeScreenshot: shots/05_join_team
+# System back is swallowed while the code box has focus; use the header arrow.
+- tapOn:
+    point: "10%,7%"
+- tapOn: "Find Opponent.*"
+- waitForAnimationToEnd
+- takeScreenshot: shots/05_radar
+- back
+- tapOn: "Booked & Scheduled Games"
+- waitForAnimationToEnd
+- takeScreenshot: shots/05_scheduled
+- back
+- assertVisible: "Build. Play. Grow Together."

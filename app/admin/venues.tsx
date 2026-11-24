@@ -2,7 +2,9 @@ import { useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, View } from 'react-native';
 import { Stack } from 'expo-router';
 
+import { useAuthStore } from '@core/auth/authStore';
 import { AppError } from '@core/errors/AppError';
+import { usePartnerActions, useVenueOwners } from '@features/partner/presentation/usePartner';
 import { useCreateVenue, useDeleteVenue, useSetVenueStatus, useUpdateVenue, useVenues } from '@features/venues/presentation/useVenues';
 import { VenueSchema } from '@features/venues/domain/venueSchema';
 import type { Venue } from '@features/venues/domain/venueSchema';
@@ -26,6 +28,26 @@ export default function ManageVenuesScreen(): React.ReactNode {
   const setVenueStatus = useSetVenueStatus();
   const deleteVenue = useDeleteVenue();
   const sportLabel = useSportLabel();
+  const isSuperadmin = useAuthStore((s) => s.isSuperadmin);
+  const owners = useVenueOwners();
+  const { assignOwner } = usePartnerActions();
+  const [assignFor, setAssignFor] = useState<string | null>(null);
+  const [assignPhone, setAssignPhone] = useState('');
+
+  const submitAssign = (venueId: string): void => {
+    assignOwner.mutate(
+      { venueId, phone: assignPhone },
+      {
+        onSuccess: () => {
+          setAssignFor(null);
+          setAssignPhone('');
+          Alert.alert('Owner assigned', 'They will see Venue Partner in Settings.');
+        },
+        onError: (e: unknown) =>
+          Alert.alert('Could not assign', e instanceof AppError ? e.message : 'Please try again.'),
+      },
+    );
+  };
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [name, setName] = useState('');
@@ -207,6 +229,28 @@ export default function ManageVenuesScreen(): React.ReactNode {
                   : 'Hidden from the picker'}
               {v.suggested_by ? ' · suggested by a captain' : ''}
             </AppText>
+            <AppText muted variant="caption">
+              Owner: {owners.data?.get(v.id)?.join(', ') ?? 'none'}
+            </AppText>
+            {isSuperadmin && assignFor === v.id ? (
+              <View style={{ gap: spacing.xs }}>
+                <TextField
+                  label="Owner's phone (must have signed up)"
+                  value={assignPhone}
+                  onChangeText={setAssignPhone}
+                  keyboardType="phone-pad"
+                  placeholder="10-digit number"
+                />
+                <View style={styles.chipRow}>
+                  <Button
+                    label="Assign"
+                    loading={assignOwner.isPending}
+                    onPress={() => submitAssign(v.id)}
+                  />
+                  <Button label="Cancel" variant="secondary" onPress={() => setAssignFor(null)} />
+                </View>
+              </View>
+            ) : null}
             <View style={styles.chipRow}>
               {v.status !== 'approved' ? (
                 <Button
@@ -222,6 +266,16 @@ export default function ManageVenuesScreen(): React.ReactNode {
                   onPress={() => setVenueStatus.mutate({ id: v.id, status: 'hidden' })}
                 />
               )}
+              {isSuperadmin && assignFor !== v.id ? (
+                <Button
+                  label="Assign owner"
+                  variant="secondary"
+                  onPress={() => {
+                    setAssignFor(v.id);
+                    setAssignPhone('');
+                  }}
+                />
+              ) : null}
             </View>
           </View>
         ))

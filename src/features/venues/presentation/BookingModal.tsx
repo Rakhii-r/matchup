@@ -7,6 +7,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   TextInput,
   View,
   type StyleProp,
@@ -16,12 +17,14 @@ import { useQueryClient } from '@tanstack/react-query';
 
 import { formatCourtLabel, formatSlotWindow } from '@features/venues/domain/slotUtils';
 import type { VenueBooking, VenueSlot } from '@features/venues/domain/venueBookingSchema';
+import { useSetBookingLights } from '@features/lights/presentation/useLights';
 import { useBookSlot } from '@features/venues/presentation/useVenueBookings';
 import { R, S, useMock, type MockPalette } from '@shared/theme/mockTheme';
 import { useSheetInsets } from '@shared/theme/responsive';
 import { AppText } from '@shared/ui/AppText';
 import { Button } from '@shared/ui/Button';
 import {
+  IconBolt,
   IconCalendar,
   IconClock,
   IconClose,
@@ -41,6 +44,8 @@ export interface BookingModalProps {
     phone?: string | null;
   };
   courtNumber: number;
+  /** This court has court lights: show the booker's opt-out switch. */
+  courtHasLights?: boolean;
   selectedDate: string; // YYYY-MM-DD
   slot: VenueSlot | null;
   onBookingSuccess?: (booking: VenueBooking) => void;
@@ -87,6 +92,7 @@ export function BookingModal({
   onClose,
   venue,
   courtNumber,
+  courtHasLights = false,
   selectedDate,
   slot,
   onBookingSuccess,
@@ -102,9 +108,12 @@ export function BookingModal({
   const styles = useMemo(() => makeStyles(M), [M]);
   const qc = useQueryClient();
   const bookSlot = useBookSlot();
+  const setBookingLights = useSetBookingLights();
 
   const [selectedMatchId, setSelectedMatchId] = useState<string | null>(initialMatchId);
   const [notes, setNotes] = useState('');
+  // Court lights opt-out. On by default; only shown for a court with lights.
+  const [lightsWanted, setLightsWanted] = useState(true);
   const [conflictError, setConflictError] = useState<string | null>(null);
   const [generalError, setGeneralError] = useState<string | null>(null);
 
@@ -115,6 +124,7 @@ export function BookingModal({
       setGeneralError(null);
       setSelectedMatchId(initialMatchId ?? null);
       setNotes('');
+      setLightsWanted(true);
     }
   }, [visible, slot, initialMatchId]);
 
@@ -174,6 +184,21 @@ export function BookingModal({
       },
       {
         onSuccess: (booking) => {
+          // Bookings default to lights on, so only an opt-out needs a call.
+          // The booking stands either way; a failure here is recoverable from
+          // the scoreboard's Turn off button.
+          if (courtHasLights && !lightsWanted) {
+            setBookingLights.mutate(
+              { bookingId: booking.id, wanted: false },
+              {
+                onError: () =>
+                  Alert.alert(
+                    'Booked, lights still on',
+                    'Your court is booked, but we could not switch its lights off. Use Turn off on the scoreboard during your game.',
+                  ),
+              },
+            );
+          }
           onBookingSuccess?.(booking);
           onClose();
         },
@@ -409,6 +434,32 @@ export function BookingModal({
                 </View>
               </View>
             )}
+
+            {courtHasLights ? (
+              <View style={styles.section}>
+                <AppText variant="caption" color={M.muted} style={styles.sectionTitle}>
+                  COURT LIGHTS
+                </AppText>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: S.sm }}>
+                  <IconBolt color={lightsWanted ? M.green : M.muted} size={18} />
+                  <AppText variant="body" color={M.text} style={{ flex: 1 }}>
+                    Blink lights on 4, 6 and wickets
+                  </AppText>
+                  <Switch
+                    value={lightsWanted}
+                    onValueChange={setLightsWanted}
+                    trackColor={{ false: '#C9CDD2', true: M.green }}
+                    thumbColor="#FFFFFF"
+                    accessibilityLabel="Blink court lights on 4, 6 and wickets"
+                  />
+                </View>
+                <AppText variant="caption" color={M.muted}>
+                  {lightsWanted
+                    ? 'Pay for lights at the counter to switch them on. You can turn them off from the scoreboard.'
+                    : 'No lights for this booking. You can turn them on from the scoreboard.'}
+                </AppText>
+              </View>
+            ) : null}
 
             {/* Notes Input */}
             <View style={styles.section}>

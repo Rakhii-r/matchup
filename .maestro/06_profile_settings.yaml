@@ -1,0 +1,15 @@
+appId: com.asrdigi.matchup
+name: Profile and settings
+---
+- launchApp
+- tapOn: "Profile"
+- assertVisible: "Performance"
+- assertVisible: "Recent Games"
+- tapOn: "Account settings"
+- assertVisible: "Settings"
+- scrollUntilVisible:
+    element: "List your venue|Venue Partner"
+    direction: DOWN
+- takeScreenshot: shots/06_settings
+- back
+- assertVisible: "Performance"

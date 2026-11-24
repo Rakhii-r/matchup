@@ -46,6 +46,7 @@ import {
   windowForTime,
   addMinutesHHmm,
   DEFAULT_SLOT_DURATION_MIN,
+  SLOT_DURATIONS_MIN,
 } from '@features/matches/presentation/useCreateMatchWizard';
 import {
   Chip,
@@ -474,11 +475,12 @@ export default function MatchDetailsStep(): React.ReactNode {
     }
   };
 
-  // Going "back" to Step 2. A deep link opens this screen with nothing behind
-  // it, where back() is a no-op, so fall back to the area route itself.
+  // Going "back" to Step 2. Not back(): "Resume Match Creation" on Home opens
+  // this screen with Home behind it, so back() left the wizard. dismissTo pops
+  // to the area step when it is in the stack, and otherwise replaces this
+  // screen with it. The answers live in the wizard store, so nothing is lost.
   const onChangeArea = (): void => {
-    if (router.canGoBack()) router.back();
-    else router.replace('/match/create/area');
+    router.dismissTo('/match/create/area');
   };
 
   // Time picker restricts to the future when the selected day is today.
@@ -711,10 +713,10 @@ export default function MatchDetailsStep(): React.ReactNode {
       {/* ---------------- Match Duration ---------------- */}
       <SectionLabel>MATCH DURATION</SectionLabel>
       <View style={styles.chipRow}>
-        {[60, 90, 120, 180].map((dur) => (
+        {SLOT_DURATIONS_MIN.map((dur) => (
           <Chip
             key={dur}
-            label={dur === 60 ? '1 hr' : dur === 90 ? '1.5 hrs' : dur === 120 ? '2 hrs' : '3 hrs'}
+            label={dur === 60 ? '1 hr' : `${dur / 60} hrs`}
             on={slotDurationMin === dur}
             /*
               One setter, not two. `setSlotDurationMin` already recomputes the
@@ -835,7 +837,7 @@ export default function MatchDetailsStep(): React.ReactNode {
       {timeHHmm && endTimeHHmm ? (
         <View style={styles.selectedSlotBanner}>
           <AppText variant="caption" color={M.green} style={{ fontWeight: '700' }} center>
-            {`✓ Match Slot: ${labelForDay(dayOffset ?? 0)} · ${format12h(timeHHmm)} – ${format12h(endTimeHHmm)} (${slotDurationMin === 60 ? '1 hr' : slotDurationMin === 90 ? '1.5 hrs' : slotDurationMin === 120 ? '2 hrs' : '3 hrs'})`}
+            {`✓ Match Slot: ${labelForDay(dayOffset ?? 0)} · ${format12h(timeHHmm)} – ${format12h(endTimeHHmm)} (${slotDurationMin === 60 ? '1 hr' : `${slotDurationMin / 60} hrs`})`}
           </AppText>
         </View>
       ) : (

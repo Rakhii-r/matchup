@@ -1,7 +1,46 @@
 # Phase 2: paid court lights — entitlement design
 
-**Status:** design for review, 30 Oct 2026. Nothing here is applied or built. The
-SQL is a draft to review, not a migration.
+**Status:** BUILT and live, 18 Nov 2026. Database:
+`supabase/migrations/20261118090000_court_lights.sql`. Edge Function:
+`supabase/functions/light-event`. App: `app/lights/` (counter screen),
+`src/features/lights/`, and the scorer chip in `LiveScoringPanel`. The SQL below
+is the original draft; the migration is the source of truth. What changed from
+the draft is listed under **As built** at the end.
+
+## Payment step dropped (23 Nov 2026)
+
+Owner's call: every booking at a court with an enabled device gets lights, no
+"Lights paid" needed. `20261123100000_court_lights_no_payment.sql` removes the
+`not_paid` branch from `enqueue_light_event` and makes `get_match_lights`
+return `paid = true`. Every 4/6 tested on 20 Nov had been skipped as
+`not_paid` while Test blink worked, which is what prompted this. The booker's
+off switch, the slot window, booker-only and the rate limit all still apply.
+`light_entitlements` and Mark paid remain but gate nothing.
+
+## AMY dashboard controller (20 Nov 2026, backend change)
+
+The AMY dashboard sends one-way `setState` RPCs. The exported device ID is
+`f14ac020-a81a-11f1-8680-eb7b4f3816b1`. To enable that controller, configure
+these **Supabase Edge Function secrets** and deploy `light-event`:
+
+- `TB_RPC_DEVICES` is a JSON object mapping the device access token already
+  linked to each RPC court to its ThingsBoard device ID. For AMY the format is
+  `{"<AMY's existing device access token>":"f14ac020-a81a-11f1-8680-eb7b4f3816b1"}`.
+  Replace the placeholder with the exact linked token. A token absent from this
+  map uses the original telemetry flow described below.
+- Set `TB_API_KEY` to an existing ThingsBoard platform API key with permission
+  to send RPC to that device. An existing password-based ThingsBoard account
+  with that permission can instead supply `TB_USERNAME` and `TB_PASSWORD`.
+  Keep these values in Supabase server secrets.
+- The sender uses `TB_HOST` (default `https://thingsboard.cloud`) and
+  `POST /api/rpc/oneway/{deviceId}`. SIX sends the string `"6"`, FOUR sends
+  `"4"`, and WICKET sends `"out"`. TEST uses the FOUR pattern. Commands
+  expire within five seconds or at the event deadline, whichever comes first.
+  Each claimed RPC is submitted once. A timeout can occur after delivery.
+- After deploying, open **Court Lights** and press **Test blink**. Its physical result
+  should match the dashboard's FOUR button. Next score a six during an eligible
+  booking. Its physical result should match the SIX button. The event log
+  records ThingsBoard's HTTP result.
 
 ## What the owner asked for
 
@@ -389,6 +428,121 @@ pulled mid-event, and a reboot.
   retention. At two devices per court (feed and controller) **that is 2 courts**,
   enough for the pilot; a third court needs a paid plan or a shared feed device.
   Shared rule engine pool, so measure the real delay; there is no latency guarantee.
+
+## As built (18 Nov 2026)
+
+Differences from the draft above:
+
+- **One ThingsBoard device per court**, the ESP32 itself (owner's setup), not a
+  feed + controller pair. The app posts telemetry to that device's token; its
+  rule chain sends the RPC back to the same device. On the Free plan that is 5
+  courts, not 2.
+- **An ordinary match logs nothing.** A 4/6/W from a scorer with no booking is
+  only logged (`scorer_not_booker`) when someone else holds a court at that
+  match's venue right now. Otherwise every boundary in the app would add a row.
+  `no_active_booking` stays in the check constraint but is not written.
+- **Device tokens are entered in the app** (Court Lights → "Link ThingsBoard
+  device", superadmin only). `set_court_device_token` writes Vault directly;
+  the token is never readable back by any client.
+- **Staff are added by phone number** on the same screen (superadmin only),
+  matched on the last 10 digits of `profiles.phone` or `auth.users.phone`.
+- **Test blink reports back**: the screen follows the TEST event for ~8 s and
+  says whether ThingsBoard accepted it (`get_light_event_status`).
+- Vault rows `light_event_url` and `light_event_secret` were created on the live
+  project on 18 Nov 2026; the secret was generated inside the database and has
+  never been printed.
+- `TB_HOST` (Edge Function secret) defaults to `https://thingsboard.cloud`. Set
+  it if the account is on another host (for example `https://eu.thingsboard.cloud`).
+
+### Player controls (owner, 18 Nov 2026)
+
+`20261118100000_court_lights_player_controls.sql`:
+
+- **Lights venues are automatic.** Any venue with a linked device on any court
+  shows a "Court lights" badge on the Venues tab; lit courts carry a "Lights"
+  tag in the court picker (`list_light_courts`).
+- **Booker opt-out.** Booking a lit court shows "Blink lights on 4, 6 and
+  wickets" (on by default). Off sets `venue_bookings.lights_wanted = false`.
+- **On/off by the scoreboard.** The booker gets Turn off / Turn on next to the
+  lights status during the slot (`set_booking_lights`, booker only, refused
+  after the slot). Off → `booker_turned_off`; a blink already queued is dropped
+  at claim.
+- **Everyone on the match** sees the status (`get_match_lights`): ON until X /
+  turned off by booker / pay at the counter / switched off by the ground.
+  Strangers see nothing.
+- The counter screen shows "Booker switched lights off" on such bookings.
+
+Verified live in a rolled-back transaction: no device → no status; link →
+1 lit court; booker sees court/paid/wanted/enabled; off → `booker_turned_off`;
+on → `queued`; off after queue → `expired`; stranger sees nothing and gets
+`NOT_YOUR_BOOKING` on toggle.
+
+### Verified on 18 Nov 2026 (live, inside rolled-back transactions)
+
+Not paid → `not_paid`; paid, no device → `no_device`; paid + device → `queued`;
+2 runs → no row; wicket → `WICKET`; 7th event in a minute → `rate_limited`;
+device off → `device_disabled`; revoked → `not_paid`; booking cancelled before
+the send → `expired/slot_over`; after the slot → no row; chip shows for the
+booker only; non-staff → `NOT_VENUE_STAFF`; staff setting a token →
+`NOT_SUPERADMIN`. Pipeline: pg_net → `light-event` → caller check → claim →
+refused with `device_disabled` when no device is linked. `record_delivery` live
+matches the migration byte for byte.
+
+**Not yet verified:** a real blink. That needs a device token linked and the rule
+chain below in ThingsBoard.
+
+## Hardware hand-off: what ThingsBoard and the ESP32 receive
+
+### 1. What the app sends
+
+For every 4, 6 or wicket that passes the rule, and for every Test blink:
+
+```
+POST {TB_HOST}/api/v1/{device access token}/telemetry
+{ "event": "SIX", "event_id": "8f1c…", "expires_at": 1795001234 }
+```
+
+`event` is `FOUR`, `SIX`, `WICKET` or `TEST`. `expires_at` is Unix seconds,
+at most 10 seconds after the ball and never past the end of the slot.
+
+### 2. Rule chain (ThingsBoard → Rule chains → Root, or the device profile's chain)
+
+After the **Save Timeseries** node, add:
+
+1. **Script filter** (`True` output continues):
+   `return msg.event === 'FOUR' || msg.event === 'SIX' || msg.event === 'WICKET' || msg.event === 'TEST';`
+2. **Script transformation**:
+   ```js
+   return {
+     msg: { method: 'blink', params: { event: msg.event, event_id: msg.event_id, expires_at: msg.expires_at } },
+     metadata: metadata,
+     msgType: 'RPC_CALL_FROM_SERVER_TO_DEVICE'
+   };
+   ```
+3. **RPC call request** node (sends to the originator, i.e. the same device).
+   Timeout 10 s. Do not make it persistent: a late blink must be dropped.
+
+### 3. What the ESP32 receives
+
+Over MQTT on `v1/devices/me/rpc/request/+`:
+
+```
+{ "method": "blink", "params": { "event": "SIX", "event_id": "8f1c…", "expires_at": 1795001234 } }
+```
+
+Suggested patterns: SIX = 6 flashes, FOUR = 4, WICKET = 3 red, TEST = 1 long.
+
+Firmware today "just blinks". Before public use it should also: ignore a
+command whose `expires_at` has passed (after NTP sync), ignore a repeated
+`event_id`, hard-cap blink length and rate for laser safety, and fail dark on
+disconnect. The cloud still enforces the slot without these; they are defence
+in depth.
+
+### 4. Linking a court
+
+ThingsBoard → Devices → the court's ESP32 → **Copy access token**. In the app:
+Settings → Court Lights → Court N → **Link ThingsBoard device** → paste → Save
+→ **Test blink**.
 
 ## Also needs updating when this ships
 

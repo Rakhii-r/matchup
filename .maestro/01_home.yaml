@@ -1,0 +1,24 @@
+appId: com.asrdigi.matchup
+name: Home dashboard
+---
+# Needs a signed-in account on the device. Read-only.
+- launchApp
+- extendedWaitUntil:
+    visible: "Good (Morning|Afternoon|Evening).*"
+    timeout: 20000
+- assertVisible: "Create Team"
+- assertVisible: "Join Team"
+- assertVisible: "Create a Game"
+- assertVisible: "Quick Host"
+- assertVisible: "Sports Available"
+# Game schedule (calendar)
+- tapOn: "Your game schedule"
+- waitForAnimationToEnd
+- takeScreenshot: shots/01_calendar
+- back
+# Notifications
+- tapOn: "Notifications"
+- waitForAnimationToEnd
+- takeScreenshot: shots/01_notifications
+- back
+- assertVisible: "Create a Game"

@@ -1473,6 +1473,150 @@ export interface Database {
         };
         Returns: Database['public']['Tables']['venue_bookings']['Row'];
       };
+      // ----- Court lights (20261118090000_court_lights.sql) -----
+      list_my_light_venues: {
+        Args: Record<string, never>;
+        Returns: { id: string; name: string; courts_count: number }[];
+      };
+      list_venue_light_bookings: {
+        Args: { in_venue_id: string; in_from: string; in_to: string };
+        Returns: {
+          booking_id: string;
+          court_number: number;
+          start_time: string;
+          end_time: string;
+          booker_name: string;
+          lights_paid: boolean;
+          amount_paise: number | null;
+          method: 'cash' | 'upi' | 'comp' | null;
+          granted_at: string | null;
+          lights_wanted: boolean;
+        }[];
+      };
+      set_lights_paid: {
+        Args: { in_booking_id: string; in_amount_paise: number; in_method: string };
+        Returns: undefined;
+      };
+      revoke_lights_paid: { Args: { in_booking_id: string }; Returns: undefined };
+      list_court_devices: {
+        Args: { in_venue_id: string };
+        Returns: {
+          court_number: number;
+          configured: boolean;
+          enabled: boolean;
+          last_event: string | null;
+          last_status: string | null;
+          last_error: string | null;
+          last_at: string | null;
+        }[];
+      };
+      set_court_device_token: {
+        Args: { in_venue_id: string; in_court_number: number; in_token: string };
+        Returns: undefined;
+      };
+      set_court_device_enabled: {
+        Args: { in_venue_id: string; in_court_number: number; in_enabled: boolean };
+        Returns: undefined;
+      };
+      send_test_blink: {
+        Args: { in_venue_id: string; in_court_number: number };
+        Returns: string;
+      };
+      get_light_event_status: {
+        Args: { in_event_id: string };
+        Returns: { status: string; error: string | null }[];
+      };
+      list_light_courts: {
+        Args: Record<string, never>;
+        Returns: { venue_id: string; court_number: number }[];
+      };
+      set_booking_lights: {
+        Args: { in_booking_id: string; in_wanted: boolean };
+        Returns: undefined;
+      };
+      get_match_lights: {
+        Args: { in_match_id: string };
+        Returns: {
+          booking_id: string;
+          venue_name: string;
+          court_number: number;
+          until: string;
+          paid: boolean;
+          wanted: boolean;
+          device_enabled: boolean;
+          i_am_booker: boolean;
+        }[];
+      };
+      list_venue_staff: {
+        Args: { in_venue_id: string };
+        Returns: { user_id: string; full_name: string; added_at: string }[];
+      };
+      add_venue_staff: { Args: { in_venue_id: string; in_phone: string }; Returns: undefined };
+      register_venue: {
+        Args: {
+          in_name: string;
+          in_address: string | null;
+          in_lat: number;
+          in_lng: number;
+          in_phone: string | null;
+          in_sports: string[];
+          in_courts: number;
+          in_open: string;
+          in_close: string;
+          in_slot: number;
+        };
+        Returns: string;
+      };
+      update_venue_details: {
+        Args: {
+          in_venue_id: string;
+          in_name: string;
+          in_address: string | null;
+          in_lat: number;
+          in_lng: number;
+          in_phone: string | null;
+          in_sports: string[];
+          in_courts: number;
+          in_open: string;
+          in_close: string;
+          in_slot: number;
+          in_facilities: string[];
+          in_image_url: string | null;
+        };
+        Returns: undefined;
+      };
+      list_my_partner_venues: {
+        Args: Record<string, never>;
+        Returns: {
+          id: string;
+          name: string;
+          address: string | null;
+          lat: number;
+          lng: number;
+          phone: string | null;
+          sport_types: string[];
+          courts_count: number;
+          operating_hours_start: string;
+          operating_hours_end: string;
+          slot_duration_minutes: number;
+          facilities: string[];
+          image_url: string | null;
+          status: string;
+          role: string;
+        }[];
+      };
+      admin_assign_venue_owner: {
+        Args: { in_venue_id: string; in_phone: string };
+        Returns: undefined;
+      };
+      admin_list_venue_owners: {
+        Args: Record<string, never>;
+        Returns: { venue_id: string; user_id: string; owner_name: string }[];
+      };
+      remove_venue_staff: {
+        Args: { in_venue_id: string; in_user_id: string };
+        Returns: undefined;
+      };
     };
     Enums: { app_role: AppRole };
     CompositeTypes: { [_ in never]: never };

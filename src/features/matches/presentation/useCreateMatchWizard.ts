@@ -28,7 +28,8 @@ import type { Sport } from '@shared/types/database.types';
  * match created with no end time is a session that can never be limited, so
  * one of these is always applied.
  */
-export const SLOT_DURATIONS_MIN = [60, 90, 120, 180] as const;
+// Whole hours only, to match court bookings (20261123120000).
+export const SLOT_DURATIONS_MIN = [60, 120, 180] as const;
 
 /**
  * How long an abandoned draft stays offerable, in ms.

@@ -44,7 +44,10 @@ function formatWhen(iso: string): string {
   return `${WEEKDAY[d.getDay()]} ${d.getDate()} ${MONTH[d.getMonth()]}, ${hh}:${mm}`;
 }
 
-/** Plain-text invite for WhatsApp. Recipients type the code into Join with code. */
+/**
+ * Invite for WhatsApp. The link opens the app on Join with the code filled in,
+ * or the Play Store when it is not installed (netlify-site/join.html).
+ */
 function buildShareText(match: Match, sportLabel: (s: Sport) => string): string {
   const lines = [
     `${match.match_name} — ${sportLabel(match.sport)}`,
@@ -57,8 +60,10 @@ function buildShareText(match: Match, sportLabel: (s: Sport) => string): string 
     '',
     `We need ${match.missing_count} more.`,
     '',
+    `Join here: https://sixfour24.netlify.app/join.html?code=${match.share_code}`,
+    '',
     `Join code: ${match.share_code}`,
-    'Open SIXFOUR 24 and tap "Join with code".',
+    'Or open SIXFOUR 24 and tap "Join with code".',
   );
   return lines.join('\n');
 }
@@ -944,13 +949,21 @@ export default function MatchDetailScreen(): React.ReactNode {
       {!isOver && !isCompleted ? (
         <View style={{ gap: spacing.sm, marginTop: spacing.md }}>
           {isCreator && data.status === 'open' ? (
-            <Button
-              label="Start match"
-              shine
-              loading={matchStatus.lock.isPending}
-              disabled={confirmedCount === 0}
-              onPress={onStartMatch}
-            />
+            <>
+              {/* No ground, no game: players must know where to go first. */}
+              <Button
+                label="Start match"
+                shine
+                loading={matchStatus.lock.isPending}
+                disabled={confirmedCount === 0 || !data.venue_id}
+                onPress={onStartMatch}
+              />
+              {!data.venue_id ? (
+                <AppText variant="caption" muted center>
+                  Select the ground before starting the match.
+                </AppText>
+              ) : null}
+            </>
           ) : null}
           {isCreator && data.status === 'locked' ? (
             <Button

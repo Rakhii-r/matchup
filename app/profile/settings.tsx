@@ -14,6 +14,8 @@ import { Stack, useRouter } from 'expo-router';
 import { useAuthStore } from '@core/auth/authStore';
 import { PRIVACY_POLICY_URL } from '@core/config/env';
 import { authRepository } from '@features/auth/data/authRepository';
+import { useMyLightVenues } from '@features/lights/presentation/useLights';
+import { useMyPartnerVenues } from '@features/partner/presentation/usePartner';
 import { useTheme } from '@shared/theme/ThemeContext';
 import { R, S, useMock, type MockPalette } from '@shared/theme/mockTheme';
 import { useBottomInset } from '@shared/theme/responsive';
@@ -21,6 +23,8 @@ import { AppText } from '@shared/ui/AppText';
 import { PageHeader } from '@shared/ui/decor';
 import {
   IconBell,
+  IconBolt,
+  IconBox,
   IconCalendar,
   IconChevron,
   IconDoc,
@@ -68,6 +72,12 @@ export default function SettingsScreen(): React.ReactNode {
   const isSuperadmin = useAuthStore((s) => s.isSuperadmin);
   const userId = useAuthStore((s) => s.session?.user.id);
   const [deleting, setDeleting] = useState(false);
+  // Venue staff see Court Lights; ordinary players get an empty list.
+  const lightVenues = useMyLightVenues();
+  const showLights = isSuperadmin || (lightVenues.data ?? []).length > 0;
+  // Owners and staff get Venue Partner; everyone else is offered "List your venue".
+  const partnerVenues = useMyPartnerVenues();
+  const isPartner = (partnerVenues.data ?? []).length > 0;
 
   // Two confirmations: this cannot be undone, and one stray tap must not do it.
   const confirmDelete = (): void => {
@@ -172,6 +182,41 @@ export default function SettingsScreen(): React.ReactNode {
           </AppText>
           <IconChevron color={M.muted} size={18} />
         </Pressable>
+
+        <AppText variant="caption" color={M.faint} style={styles.settingsLabel}>
+          VENUE
+        </AppText>
+        <Pressable
+          style={styles.settingRow}
+          onPress={() => router.push((isPartner ? '/partner' : '/partner/register') as never)}
+          accessibilityRole="button"
+        >
+          <View style={[styles.settingIcon, { backgroundColor: M.border }]}>
+            <IconBox color={M.green} size={20} />
+          </View>
+          <AppText variant="label" color={M.text} style={{ flex: 1, fontSize: 16 }}>
+            {isPartner ? 'Venue Partner' : 'List your venue'}
+          </AppText>
+          <IconChevron color={M.muted} size={18} />
+        </Pressable>
+
+        {showLights ? (
+          <>
+            <Pressable
+              style={styles.settingRow}
+              onPress={() => router.push('/lights' as never)}
+              accessibilityRole="button"
+            >
+              <View style={[styles.settingIcon, { backgroundColor: M.border }]}>
+                <IconBolt color={M.green} size={20} />
+              </View>
+              <AppText variant="label" color={M.text} style={{ flex: 1, fontSize: 16 }}>
+                Court Lights
+              </AppText>
+              <IconChevron color={M.muted} size={18} />
+            </Pressable>
+          </>
+        ) : null}
 
         {isSuperadmin ? (
           <>

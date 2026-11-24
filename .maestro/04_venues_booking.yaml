@@ -1,0 +1,28 @@
+appId: com.asrdigi.matchup
+name: Venues list and court booking sheet (hourly only, no booking made)
+---
+- launchApp
+- tapOn: "Venues"
+- assertVisible: "Find a Venue"
+- assertVisible: "My Bookings"
+- tapOn:
+    text: "Book Court"
+    index: 0
+- extendedWaitUntil:
+    visible: "Select a Time Slot"
+    timeout: 15000
+- takeScreenshot: shots/04_slot_sheet
+# Whole hours only (20261123120000_hourly_bookings_only)
+- assertVisible: "1 hr"
+- assertVisible: "2 hrs"
+- assertVisible: "3 hrs"
+- assertNotVisible: "1.5 hrs"
+- assertNotVisible: "2.5 hrs"
+- tapOn: "2 hrs"
+- takeScreenshot: shots/04_slot_sheet_2h
+- tapOn: "Close picker"
+- tapOn: "My Bookings"
+- waitForAnimationToEnd
+- takeScreenshot: shots/04_my_bookings
+- back
+- assertVisible: "Find a Venue"

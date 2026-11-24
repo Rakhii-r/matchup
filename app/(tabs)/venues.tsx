@@ -15,6 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect } from 'expo-router';
 
+import { useLightCourts } from '@features/lights/presentation/useLights';
 import { useVenues } from '@features/venues/presentation/useVenues';
 import { useActiveSports, useSportLabel } from '@features/sports/presentation/useSports';
 import { CourtSlotPickerSheet } from '@features/venues/presentation/CourtSlotPickerSheet';
@@ -28,6 +29,7 @@ import { useTabContentPadding } from '@shared/theme/responsive';
 import { AppLogo } from '@shared/ui/AppLogo';
 import { AppText } from '@shared/ui/AppText';
 import {
+  IconBolt,
   IconCalendar,
   IconClose,
   IconDirections,
@@ -55,6 +57,7 @@ export default function VenuesScreen(): React.ReactNode {
   const { data: allVenues, isLoading, isError, refetch, isRefetching } = useVenues();
   const sportLabel = useSportLabel();
   const activeSports = useActiveSports();
+  const lightCourts = useLightCourts();
 
   /*
     A sport switched off in Sports Management must vanish here too. This list
@@ -311,6 +314,14 @@ export default function VenuesScreen(): React.ReactNode {
                       </AppText>
                     </View>
                   ))}
+                  {lightCourts.data?.venues.has(v.id) ? (
+                    <View style={[styles.chip, { flexDirection: 'row', alignItems: 'center', gap: 4 }]}>
+                      <IconBolt color={M.green} size={12} />
+                      <AppText variant="caption" color={M.green} style={{ fontWeight: '700' }}>
+                        Court lights
+                      </AppText>
+                    </View>
+                  ) : null}
                 </View>
 
                 <AppText variant="caption" color={M.muted} style={{ marginTop: S.sm }}>

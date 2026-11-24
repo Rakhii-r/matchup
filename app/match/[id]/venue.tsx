@@ -95,6 +95,13 @@ export default function MatchVenueScreen(): React.ReactNode {
 
   // The sheet opens on the day the game is actually on, not on today.
   const matchDateIso = data?.scheduled_at ? formatDateIso(new Date(data.scheduled_at)) : undefined;
+  // ...and on the game's own length, so a 2-hour game is not booked as 1 hour.
+  const matchDurationMinutes =
+    data?.scheduled_at && data.end_time
+      ? Math.round(
+          (new Date(data.end_time).getTime() - new Date(data.scheduled_at).getTime()) / 60000,
+        )
+      : undefined;
 
   const onPick = (venueId: string | null) => {
     setVenue.mutate(venueId, {
@@ -292,6 +299,8 @@ export default function MatchVenueScreen(): React.ReactNode {
         onClose={() => setBookingVenue(null)}
         venue={bookingVenue}
         initialDate={matchDateIso}
+        initialStartTime={data.scheduled_at ?? undefined}
+        initialDurationMinutes={matchDurationMinutes}
         initialMatchId={matchId}
         matches={[
           {

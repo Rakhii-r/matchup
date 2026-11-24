@@ -11,6 +11,7 @@ import {
 import { formatCourtLabel } from '@features/venues/domain/slotUtils';
 import { R, S, useMock, type MockPalette } from '@shared/theme/mockTheme';
 import { AppText } from '@shared/ui/AppText';
+import { IconBolt } from '@shared/ui/icons';
 
 export interface CourtPickerProps {
   courtsCount?: number;
@@ -23,6 +24,8 @@ export interface CourtPickerProps {
   };
   showLabel?: boolean;
   style?: StyleProp<ViewStyle>;
+  /** Court numbers that have court lights; each gets a "Lights" tag. */
+  litCourts?: ReadonlySet<number>;
 }
 
 /**
@@ -38,6 +41,7 @@ export function CourtPicker({
   venue,
   showLabel = true,
   style,
+  litCourts,
 }: CourtPickerProps): React.ReactNode {
   const M = useMock();
   const styles = useMemo(() => makeStyles(M), [M]);
@@ -67,6 +71,7 @@ export function CourtPicker({
             <AppText variant="label" color={M.green} style={styles.chipTextSelected}>
               {formatCourtLabel(1, sports)}
             </AppText>
+            {litCourts?.has(1) ? <LightsTag color={M.green} /> : null}
           </View>
           <AppText variant="caption" color={M.muted} style={styles.singleNotice}>
             (Single court venue)
@@ -101,11 +106,25 @@ export function CourtPicker({
                 >
                   {label}
                 </AppText>
+                {litCourts?.has(courtNum) ? (
+                  <LightsTag color={isSelected ? M.green : M.muted} />
+                ) : null}
               </Pressable>
             );
           })}
         </ScrollView>
       )}
+    </View>
+  );
+}
+
+function LightsTag({ color }: { color: string }): React.ReactNode {
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2, marginTop: 2 }}>
+      <IconBolt color={color} size={12} />
+      <AppText variant="caption" color={color} style={{ fontSize: 11, fontWeight: '700' }}>
+        Lights
+      </AppText>
     </View>
   );
 }

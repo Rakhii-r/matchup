@@ -1,0 +1,19 @@
+appId: com.asrdigi.matchup
+name: Games tab, distance filter, join with code
+---
+- launchApp
+- tapOn: "Games"
+- assertVisible: "Find a Match"
+- assertVisible: "SEARCH DISTANCE"
+- tapOn: "25 km"
+- tapOn: "All"
+# No waitForAnimationToEnd here: the radar card animates forever and the wait hangs.
+- tapOn: "Join with code"
+- assertVisible: "Join a game"
+# Code box accepts at most 6 chars, upper-cased
+- tapOn: "ABC123"
+- inputText: "abcdefgh"
+- assertVisible: "ABCDEF"
+- hideKeyboard
+- back
+- assertVisible: "Find a Match"

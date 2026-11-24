@@ -1,0 +1,55 @@
+appId: com.asrdigi.matchup
+name: List your venue form refuses half-hour times (never submits)
+---
+# The client check stops the form before any RPC. Open time 06:30 must be refused.
+- launchApp
+- tapOn: "Profile"
+- tapOn: "Account settings"
+- scrollUntilVisible:
+    element: "List your venue"
+    direction: DOWN
+- tapOn: "List your venue"
+- assertVisible: "Venue name.*"
+- assertNotVisible: "Slot length"
+- scrollUntilVisible:
+    element: "Courts are booked in 1-hour slots.*"
+    direction: DOWN
+- scrollUntilVisible:
+    element: "e.g. Akhil Box"
+    direction: UP
+- tapOn: "e.g. Akhil Box"
+- inputText: "Maestro Test Box"
+- hideKeyboard
+- scrollUntilVisible:
+    element: "https://www.google.com/maps/place/..."
+    direction: DOWN
+- tapOn: "https://www.google.com/maps/place/..."
+- inputText: "17.49, 78.40"
+- hideKeyboard
+- tapOn: "Use this link"
+# Scroll past the chip so it sits still mid-screen; a tap during scroll momentum is lost.
+- scrollUntilVisible:
+    element: "Courts / boxes"
+    direction: DOWN
+    centerElement: true
+- waitForAnimationToEnd
+- tapOn:
+    text: "Box Cricket"
+    below: "Sports.*"
+- scrollUntilVisible:
+    element: "06:00"
+    direction: DOWN
+- tapOn: "06:00"
+- eraseText: 10
+- inputText: "06:30"
+- hideKeyboard
+- scrollUntilVisible:
+    element: "Submit for approval"
+    direction: DOWN
+- tapOn: "Submit for approval"
+# Error shows just above the Submit button.
+- scrollUntilVisible:
+    element: "Opening time must be on the hour.*"
+    direction: DOWN
+- takeScreenshot: shots/07_half_hour_refused
+- back

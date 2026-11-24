@@ -464,6 +464,90 @@ which ones are blocked by dependencies rather than effort.
   declared format and refuses its own invite code before calling the server.
 - The Teams-tab pill shows the format (`6v6`), not `members/target_size`.
 
+## Tester fixes (23 Nov 2026)
+
+- **No ground, no start.** The lobby's Start match is disabled until
+  `matches.venue_id` is set, with a line saying why. Client-side only.
+- **Cancelling a game frees its court.** Trigger `matches_free_bookings_on_cancel`
+  (`20261123090000`) cancels the match's confirmed, not-yet-ended
+  `venue_bookings` when status becomes `cancelled`. A booking made from the
+  Venues tab has `match_id` null and is cancelled from My Bookings.
+- **Ground booking follows the game.** `app/match/[id]/venue.tsx` passes the
+  match's start and length to `CourtSlotPickerSheet` (`initialStartTime`,
+  `initialDurationMinutes`): it opens on that duration with the match's slot
+  pre-selected when free. Before, it defaulted to 1 hr and any slot, and
+  booking moved the game to whatever was picked.
+- **Invite link.** The WhatsApp share carries
+  `https://sixfour24.netlify.app/join.html?code=XXXXXX`. On Android the page
+  fires `intent://match/join?code=…` (scheme `sixfour24`): the app opens on Join
+  with the code filled in, or the Play Store if it is not installed.
+  `app/match/join.tsx` reads `?code=`; joining still needs the tap.
+- Game Details "Change" play area uses `router.dismissTo('/match/create/area')`:
+  Resume from Home opens details with Home behind it, so `back()` left the wizard.
+- **Courts book in whole hours only** (`20261123120000_hourly_bookings_only.sql`).
+  Every venue has `slot_duration_minutes = 60`; `validate_venue_input` refuses
+  any other slot and opening/closing times not on the hour; `book_venue_slot`
+  refuses a start not on the hour in IST (`UNALIGNED_SLOT_START`) and a length
+  that is not a multiple of 60 (`INVALID_SLOT_DURATION`). App choices are
+  1/2/3 hrs (`CourtSlotPickerSheet`, `SLOT_DURATIONS_MIN`); the partner form
+  has no slot picker. Check "on the hour" in Asia/Kolkata, never UTC: IST is
+  +5:30, so a UTC check would refuse every real slot.
+
+## Venue Partner — owner login (23 Nov 2026)
+
+Venue owners use the same app and phone OTP. Plan and status:
+`docs/VENUE_PARTNER_PLAN.md` (phase 1 built: register, approve, assign,
+edit; prices, bookings calendar and walk-in blocking still to come).
+
+- **Roles live in `venue_staff.role`** ('owner' | 'staff'). An owner is also
+  counter staff, so they see Court Lights too. Check with `is_venue_owner` /
+  `is_venue_member`, never a new table.
+- **A registered venue is `pending`** and invisible to players until an admin
+  approves it in Admin → Venues. The `venues_select` policy enforces this
+  (approved, or admin, or that venue's owner/staff); before 23 Nov every
+  venue row was readable by everyone.
+- Every owner write is a SECURITY DEFINER RPC that re-runs
+  `validate_venue_input`. Cover photos only from
+  `venue-images/partner/<venue_id>/`.
+
+## Court lights — the owner's "Phase 2" (18 Nov 2026)
+
+A 4, 6 or wicket blinks the lights at the box through ThingsBoard, as a paid
+add-on. Not the `MatchUp_Phase2_*.docx` scope. Full design, hardware hand-off
+and test results: `docs/PHASE2_LIGHTS_DESIGN.md`.
+
+- **The rule lives in one place**, `enqueue_light_event`, called from
+  `record_delivery` inside its own exception block: a lights failure can never
+  stop a ball being saved. Fires only if the scorer holds a confirmed booking
+  NOW, has not switched lights off, and the court has an enabled device
+  (`court_devices`). **No payment step since 23 Nov 2026**
+  (`20261123100000_court_lights_no_payment.sql`): `light_entitlements` and the
+  counter's Mark paid still exist but gate nothing, and `get_match_lights`
+  always reports `paid = true`. Booker only: a friend scoring logs
+  `scorer_not_booker`. Wides never fire (no `runs_off_bat`).
+- **Late is never.** Events expire 10 s after the ball and never past the slot
+  end; `claim_light_event` re-checks before the Edge Function sends. No replay.
+- `light_events` logs every fire and every skip (except plain matches with no
+  booking at the venue), so "I paid and nothing blinked" is answerable.
+- Device tokens live in **Vault only** (`tb_device_<venue>_<court>`), written by
+  `set_court_device_token` (superadmin). Never add a column or RPC that returns one.
+- `light-event` has `verify_jwt = false`; its guard is
+  `verify_light_event_caller` against vault `light_event_secret`, the same
+  one-copy pattern as notify-wave.
+- App: Settings → **Court Lights** (`app/lights/`), shown to superadmins and
+  `venue_staff`.
+- **Player side** (`20261118100000_court_lights_player_controls.sql`). A venue
+  "has lights" automatically once any court has a `court_devices` row
+  (`list_light_courts`): a "Court lights" badge on the Venues tab card and a
+  "Lights" tag on each lit court in `CourtPicker`. The booker opts out in
+  `BookingModal` (switch, default on) or toggles from the scoreboard:
+  `venue_bookings.lights_wanted` via `set_booking_lights` (booker only, during
+  the booking). Off → skip reason `booker_turned_off`, and `claim_light_event`
+  re-checks it so an already queued blink is dropped. `LightsChip` shows
+  everyone on the match the status from `get_match_lights` (the court of the
+  scorer's — before scoring, the organiser's — live booking), with Turn on/off
+  for the booker only. Display only.
+
 ## NOT built yet
 
 Reliability score · match chat · live venue availability · feed algorithm ·

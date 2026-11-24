@@ -23,6 +23,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 
 import { AppError } from '@core/errors/AppError';
 import { useAuthStore } from '@core/auth/authStore';
+import { LightsChip } from '@features/lights/presentation/LightsChip';
 import { SlotBadge } from '@features/matches/presentation/SlotBadge';
 import { useMatch } from '@features/matches/presentation/useMatches';
 import { useSlotCountdown } from '@features/matches/presentation/useSlotCountdown';
@@ -315,6 +316,7 @@ export function LiveScoringPanel({
   return (
     <>
       <SlotBadge slot={slot} />
+      <LightsChip matchId={matchId} />
 
       {/* ---------------- Scoreboard ---------------- */}
       <View style={[styles.board, { backgroundColor: M.chip }]}>

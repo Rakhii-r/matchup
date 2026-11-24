@@ -40,3 +40,7 @@ enable_confirmations = true
 # service role key before touching the queue.
 [functions.notify-wave]
 verify_jwt = true
+
+# Own caller check against vault light_event_secret (see the function header).
+[functions.light-event]
+verify_jwt = false

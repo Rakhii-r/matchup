@@ -1,16 +1,6 @@
-# Maestro E2E Master Configuration
-# SixFour24 (Matchup) Mobile App
-# Run entire suite: maestro test .maestro/
-# Run individual flow: maestro test .maestro/01_home_and_calendar.yaml
-
-appId: com.asrdigi.matchup
-# For Expo Go testing, replace appId with: host.exp.exponent
----
-- runFlow: 01_home_and_calendar.yaml
-- runFlow: 02_matches_feed.yaml
-- runFlow: 03_create_match.yaml
-- runFlow: 04_live_radar.yaml
-- runFlow: 05_venues_directory.yaml
-- runFlow: 06_profile_and_theme.yaml
-- runFlow: 07_game_offers_deduplication.yaml
-- runFlow: 08_global_match_discovery.yaml
+# SIXFOUR24 Maestro smoke suite (rewritten 23 Nov 2026).
+# Device must be signed in. Flows are read-only: nothing is posted, booked or submitted.
+# Run all:  maestro test .maestro/
+# Old Aug 2026 flows (stale texts) are in legacy/ and are not run.
+flows:
+  - "0*.yaml"
